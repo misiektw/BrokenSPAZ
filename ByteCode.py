@@ -99,6 +99,12 @@ class ByteCode(BinaryReading):
     def getIndex(self):
         return self.idxPtr
 
+    def dump(self, start, end):
+        try:
+            return self.byteStream[self.idxTable[start]:self.idxTable[end]]
+        except IndexError:
+            return self.byteStream[self.idxTable[start]:]
+
     '''
     Patches the string offsets into the blank locations of the stream as described in the Identification Table
     @param  identTable  Identification Table described in the file
@@ -106,4 +112,4 @@ class ByteCode(BinaryReading):
     def patchStrings(self, identTable):
         for offset, locations in identTable.items():
             for loc in locations:
-                self.replace(loc, offset)
+                self.replace(self.idxTable[loc], offset)

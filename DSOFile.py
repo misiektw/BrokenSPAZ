@@ -11,7 +11,9 @@ class DSOFile():
     Constructs a DSOFile object
     @param  binReader    Binary reader to parse the table from
     '''
-    def __init__(self, binReader):
+    def __init__(self, name, binReader):
+        self.name = name
+
         # Parse the version of script:
         self.version = binReader.unpackUint32()
 

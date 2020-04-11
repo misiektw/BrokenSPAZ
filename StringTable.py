@@ -18,3 +18,19 @@ class StringTable(dict):
         while offset < tableLen:
             self[offset] = binReader.readString()
             offset += len(self[offset]) + 1
+
+    def __getitem__(self, key):
+        try:
+            # Try default dict operator:
+            return super().__getitem__(key)
+        except KeyError:
+            # Decrease the index until a valid key is found:
+            k = key
+            while k >= 0 and k not in self:
+                k -= 1
+
+            if k < 0:
+                raise KeyError
+            else:
+                # Return substring:
+                return self[k][key-k:]
