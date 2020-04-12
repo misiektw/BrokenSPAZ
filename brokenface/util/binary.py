@@ -3,9 +3,9 @@ from struct import pack, unpack
 '''
 Generic methods for reading and unpacking bytes and words from a byte stream
 '''
-class BinaryReading():
+class Reading():
     '''
-    Constructs a BinaryReading object
+    Constructs a Reading object
     @param  byteStream  Bytes to be copied
     @param  endian      Endianess of byte stream
     '''

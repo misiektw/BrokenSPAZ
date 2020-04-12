@@ -1,40 +1,21 @@
-import sys
+from sys import stdout
 import logging
 
-from DSOFile import DSOFile
+from core import dso, torque
 
-from TorqueFile import TorqueFile
-from TorqueFunctionCall import TorqueFunctionCall
-from TorqueFunctionDeclaration import TorqueFunctionDeclaration
-from TorqueObject import TorqueObject
-from TorqueReturn import TorqueReturn
-from TorqueVariable import TorqueVariable
-
-class TorqueDecoding:
-
-    metadata = {
-        "META_ELSE":            100,
-        "META_END_IF":          101,
-        "META_END_WHILE_FLT":   102,
-        "META_END_WHILE":       103,
-        "META_END_FUNC":        104,
-        "META_END_BINARY_OP":   105,
-        "META_SKIP":            106,
-        "META_END_WHILE_B":     107
-    }
-
-    def __init__(self, dso, inFunction=False, offset=0, sink=sys.stdout):
-        self.dso = dso
+class Decoding:
+    def __init__(self, dsoFile, inFunction=False, offset=0, sink=stdout):
+        self.file = dsoFile
         self.inFunction = inFunction
         self.offset = offset
         self.sink = sink
 
         if inFunction:
-            self.currentStringTable = self.dso.functionStringTable
-            self.currentFloatTable = self.dso.functionFloatTable
+            self.currentStringTable = self.file.functionStringTable
+            self.currentFloatTable = self.file.functionFloatTable
         else:
-            self.currentStringTable = self.dso.globalStringTable
-            self.currentFloatTable = self.dso.globalFloatTable
+            self.currentStringTable = self.file.globalStringTable
+            self.currentFloatTable = self.file.globalFloatTable
 
         self.curvar = None
         self.curobj = None
@@ -46,45 +27,44 @@ class TorqueDecoding:
         self.intStack = []
         self.strStack = []
 
-        self.tree = TorqueFile(self.dso.name)
-        self.currentNode = self.tree
+        self.tree = torque.Tree(torque.File(self.file.name))
 
         self.ip = 0
 
         logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] %(lineno)d: %(message)s")
 
-        logging.info("globalStringTable id: {}".format(hex(id(self.dso.globalStringTable))))
-        logging.info("functionStringTable id: {}".format(hex(id(self.dso.functionStringTable))))
+        logging.info("globalStringTable id: {}".format(hex(id(self.file.globalStringTable))))
+        logging.info("functionStringTable id: {}".format(hex(id(self.file.functionStringTable))))
 
     def updateIP(self):
-        self.ip = self.dso.byteCode.idxPtr
+        self.ip = self.file.byteCode.idxPtr
 
     def getCode(self):
         try:
-            return self.dso.byteCode.getCode()
+            return self.file.byteCode.getCode()
         except IndexError as e:
-            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.dso.byteCode.getIndex()))
+            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.file.byteCode.getIndex()))
             quit()
 
     def lookupCode(self):
         try:
-            return self.dso.byteCode.lookupCode()
+            return self.file.byteCode.lookupCode()
         except IndexError as e:
-            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.dso.byteCode.getIndex()))
+            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.file.byteCode.getIndex()))
             quit()
 
     def insertCode(self, idx, code):
         try:
-            self.dso.byteCode.insertCode(idx, code)
+            self.file.byteCode.insertCode(idx, code)
         except IndexError as e:
             logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), idx))
             quit()
 
     def getStringOffset(self):
         try:
-            return self.dso.byteCode.getStringOffset()
+            return self.file.byteCode.getStringOffset()
         except IndexError as e:
-            logging.error("IP: {}: {}: Unable to access string offset: {}".format(self.ip, repr(e), self.dso.byteCode.getIndex()))
+            logging.error("IP: {}: {}: Unable to access string offset: {}".format(self.ip, repr(e), self.file.byteCode.getIndex()))
             quit()
 
     def getString(self):
@@ -105,12 +85,12 @@ class TorqueDecoding:
     def getGlobalString(self):
         offset = self.getStringOffset()
         try:
-            return self.dso.globalStringTable[offset]
+            return self.file.globalStringTable[offset]
         except KeyError as e:
             logging.error("IP: {}: {}: Unable to access table {} at given offset: {}".format(self.ip, repr(e), hex(id(self.currentStringTable)), hex(offset)))
 
     def dumpInstruction(self):
-        return self.dso.byteCode.dump(self.ip, self.dso.byteCode.getIndex())
+        return self.file.byteCode.dump(self.ip, self.file.byteCode.getIndex())
 
     def opFuncDecl(self):
         funcName = self.getString()
@@ -133,15 +113,15 @@ class TorqueDecoding:
         for _ in range(0, argc):
             argv.append(self.getString())
 
-        self.currentNode.append(TorqueFunctionDeclaration(funcName, namespace, package, hasBody, end, argc, argv))
-        self.currentNode = self.currentNode.children[-1]
+        self.tree.append(torque.FuncDecl(funcName, namespace, package, hasBody, end, argc, argv))
+        self.tree.focusChild()
 
         logging.debug("IP: {}: {}: Function declaration: {}, {}, {}, {}, {}, {}, {}".format(self.ip, self.dumpInstruction(), funcName, namespace, package, hasBody, end, argc, argv))
 
         # Is this right?
         #self.inFunction = True
-        #self.currentStringTable = self.dso.functionStringTable
-        #self.currentFloatTable = self.dso.functionFloatTable
+        #self.currentStringTable = self.file.functionStringTable
+        #self.currentFloatTable = self.file.functionFloatTable
 
     def opCreateObject(self):
         # A 0 has been pushed to the int stack because it will contain a handle to the object
@@ -157,23 +137,23 @@ class TorqueDecoding:
 
         argv = self.argFrame.pop()
 
-        self.currentNode.append(TorqueObject(parent, isDataBlock, isInternal, isMessage, failJump, argv))
-        self.currentNode = self.currentNode.children[-1]
+        self.tree.append(torque.ObjDecl(parent, isDataBlock, isInternal, isMessage, failJump, argv))
+        self.tree.focusChild()
 
         logging.debug("IP: {}: {}: Object creation: {}, {}, {}, {}, {}, {}".format(self.ip, self.dumpInstruction(), parent, isDataBlock, isInternal, isMessage, failJump, argv))
 
     def opEndObject(self):
-        self.currentNode.id = self.getCode() # TODO: Find out what this is about
-        self.intStack[-1] = self.currentNode.id
+        self.tree.getFocused().id = self.getCode() # TODO: Find out what this is about
+        self.intStack[-1] = self.tree.getFocused().id
 
-        self.currentNode = self.currentNode.parent
+        self.tree.focusParent()
 
         logging.debug("IP: {}: {}: Ended object".format(self.ip, self.dumpInstruction()))
 
     def opReturn(self):
         ret = self.getCode()
 
-        self.currentNode.append(TorqueReturn(ret))
+        self.tree.append(torque.Return(ret))
 
         logging.debug("IP: {}: {}: Returned: {}".format(self.ip, self.dumpInstruction(), ret))
 
@@ -195,14 +175,14 @@ class TorqueDecoding:
     def opSavevarUint(self):
         self.curvar = (self.curvar, self.intStack[-1])
 
-        self.currentNode.append(TorqueVariable(self.curvar[0], self.curvar[1]))
+        self.tree.append(torque.Variable(self.curvar[0], self.curvar[1]))
 
         logging.debug("IP: {}: {}: Saved variable: {}".format(self.ip, self.dumpInstruction(), self.curvar))
 
     def opSavevarStr(self):
         self.curvar = (self.curvar, self.strStack[-1])
 
-        self.currentNode.append(TorqueVariable(self.curvar[0], self.curvar[1]))
+        self.tree.append(torque.Variable(self.curvar[0], self.curvar[1]))
 
         logging.debug("IP: {}: {}: Saved variable: {}".format(self.ip, self.dumpInstruction(), self.curvar))
 
@@ -257,7 +237,7 @@ class TorqueDecoding:
 
         argv = self.argFrame[-1]
 
-        self.currentNode.append(TorqueFunctionCall(funcName, namespace, callType, argv))
+        self.tree.append(torque.FuncCall(funcName, namespace, callType, argv))
 
         logging.debug("IP: {}: {}: Function call: {}, {}, {}, {}".format(self.ip, self.dumpInstruction(), funcName, namespace, callType, argv))
 
@@ -314,7 +294,7 @@ class TorqueDecoding:
 
     def decode(self):
         try:
-            while self.ip < self.dso.byteCode.length:
+            while self.ip < self.file.byteCode.codLen:
                 opCode = self.getCode()
                 self.callOp[opCode](self)
                 self.updateIP()
