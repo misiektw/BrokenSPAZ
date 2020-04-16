@@ -26,6 +26,7 @@ class StringStack(list):
             elif ch == ",":
                 self.append(torque.Concat([self.pop(), "\",\""]))
             elif ch == "\x00":
+                print("Appending comp")
                 self.append(torque.StringEqual([self.pop()]))
             else:
                 self.append(torque.Concat([self.pop(), "\"" + ch + "\""]))
@@ -776,7 +777,12 @@ class Decoding:
         logging.debug("IP: {}: {}: Terminate and rewind string stack".format(self.ip, self.dumpInstruction()))
 
     def opCompareStr(self):
-        self.intStack.append(self.strStack[-1])
+        s2 = self.strStack.pop()
+        op = self.strStack.pop()
+
+        op.operands.append(s2)
+
+        self.intStack.append(op)
 
         logging.debug("IP: {}: {}: Compare strings".format(self.ip, self.dumpInstruction()))
 
