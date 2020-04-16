@@ -15,4 +15,6 @@ decoder = codec.Decoding(myFile)
 decoder.decode()
 
 decoder.tree.rewind()
-decoder.tree.dump()
+
+with open("/tmp/decompiled.txt", "w") as fd:
+    decoder.tree.dump(sink=fd)

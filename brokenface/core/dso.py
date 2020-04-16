@@ -23,34 +23,6 @@ class StringTable(dict):
             self[offset] = binReader.readString()
             offset += len(self[offset]) + 1
 
-    '''
-    Gets a string or substring of the table
-    @param  key     Key of entry to be retrieved
-    '''
-    def __getitem__(self, key):
-        # If out of bounds:
-        if key < 0 or key >= self.binLen:
-            raise KeyError
-
-        try:
-            # Try default dict operator:
-            return super().__getitem__(key)
-        except KeyError:
-            # If null byte:
-            if key + 1 in self:
-                raise KeyError
-
-            # Decrease until a valid key is found:
-            k = key
-            while k >= 0 and k not in self:
-                k -= 1
-
-            if k < 0:
-                raise KeyError
-            else:
-                # Return substring:
-                return self[k][key-k:]
-
 
 '''
 Table of floating point numbers, represented as a list of floats
@@ -88,7 +60,6 @@ class ByteCode(binary.Reading):
 
         # A list of indexes of the codes into the stream, so that the bytecode can be accessed by code and not only by byte:
         self.idxTable = []
-        self.idxPtr = 0
 
         self.codLen = binReader.unpackUint32() # Number of codes
 
@@ -120,8 +91,6 @@ class ByteCode(binary.Reading):
         if code == self.ctrlCode:
             # Get the actual 2-bytes long code:
             code = self.unpackUint16()
-
-        self.idxPtr += 1
         
         return code
 
@@ -131,43 +100,40 @@ class ByteCode(binary.Reading):
     def lookupCode(self):
         return self.lookupUnpackUint8()
 
-    '''
-    Insert a code value into the bytecode
-    @param  idx     Index of the bytecode to be inserted
-    @param  code    1- or 2-bytes long unsigned integer to be inserted
-    '''
-    def insertCode(self, idx, code):
-        if code < 255:
-            self.packInsertUint8(self.idxTable[idx], code)
-            inserted = 1
+    def getUint(self):
+        # If control byte:
+        if self.lookupStringOffset()[1] == self.ctrlCode:
+            # Discard two bytes:
+            self.read16()
+            # Get 2-bytes long little endian integer:
+            return self.unpackUint16(endian="big")
         else:
-            self.insert(self.idxTable[idx], self.ctrlByte)
-            self.packInsertUint16(self.idxTable[idx] + 1, code)
-            inserted = 3
-
-        # Insert index of the newly inserted code in the index table
-        self.idxTable.insert(idx, self.idxTable[idx])
-
-        # Update the following indices:
-        for index in self.idxTable[idx+1:]:
-            index += inserted
+            # Get 2-bytes long big endian integer:
+            return self.unpackUint16(endian="big")
 
     '''
     Retrieves the string offset currently pointed at
     '''
     def getStringOffset(self):
+        # If control byte:
+        if self.lookupStringOffset()[1] == self.ctrlCode:
+            # Discard two bytes:
+            self.read16()
+            # Get 2-bytes long little endian offset:
+            return self.unpackUint16()
+        elif self.pointer in self.patches:
+            # Get 2-bytes long little endian offset:
+            return self.unpackUint16()
+        else:
+            # Get 2-bytes long big endian offset:
+            return self.unpackUint16(endian="big")
+
+    def lookupStringOffset(self):
         # String offsets are 2-bytes long, taking two codes:
-        offset = self.unpackUint16()
+        return self.lookup16()
 
-        self.idxPtr += 2
-
-        return offset
-
-    '''
-    Retrieves the index of the current code
-    '''
-    def getIndex(self):
-        return self.idxPtr
+    def getFloatOffset(self):
+        return self.unpackUint16(endian="big")
 
     '''
     Dump chunk of bytecode
@@ -175,19 +141,18 @@ class ByteCode(binary.Reading):
     @param  end     End code index of chunk
     '''
     def dump(self, start, end):
-        try:
-            return self.byteStream[self.idxTable[start]:self.idxTable[end]]
-        except IndexError:
-            return self.byteStream[self.idxTable[start]:]
+        return self.byteStream[start:end]
 
     '''
     Patches the string offsets into the blank locations of the stream as described in the Identification Table
     @param  identTable  Identification Table described in the file
     '''
     def patchStrings(self, identTable):
+        self.patches = []
         for offset, locations in identTable.items():
             for loc in locations:
                 self.replace(self.idxTable[loc], offset)
+                self.patches.append(self.idxTable[loc])
 
 
 '''

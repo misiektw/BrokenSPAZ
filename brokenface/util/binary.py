@@ -81,22 +81,36 @@ class Reading():
     Reads two bytes and unpacks it into an unsigned integer
     @return int 16-bits long unsigned integer
     '''
-    def unpackUint16(self):
-        return int.from_bytes(self.read16(), byteorder=self.endian, signed=False)
+    def unpackUint16(self, endian=None):
+        if endian is None:
+            return int.from_bytes(self.read16(), byteorder=self.endian, signed=False)
+        else:
+            return int.from_bytes(self.read16(), byteorder=endian, signed=False)
 
     '''
     Reads four bytes and unpacks it into an unsigned integer
     @return int 32-bits long unsigned integer
     '''
-    def unpackUint32(self):
-        return int.from_bytes(self.read32(), byteorder=self.endian, signed=False)
+    def unpackUint32(self, endian=None):
+        if endian is None:
+            return int.from_bytes(self.read32(), byteorder=self.endian, signed=False)
+        else:
+            return int.from_bytes(self.read32(), byteorder=endian, signed=False)
+
+    structEndian = {
+        "little":   "<",
+        "big":      ">"
+    }
 
     '''
     Reads four bytes and unpacks it into a float
     @return int 32-bits long float
     '''
-    def unpackFloat32(self):
-        return unpack("f", self.read32())[0]
+    def unpackFloat32(self, endian=None):
+        if endian is None:
+            return unpack(self.structEndian[self.endian] + "f", self.read32())[0]
+        else:
+            return unpack(self.structEndian[endian] + "f", self.read32())[0]
 
     '''
     The same as read, but without moving the reading pointer
@@ -119,11 +133,21 @@ class Reading():
         return self.lookup(1)
 
     '''
+    Looks up two bytes from byte stream
+    @return bytes   Bytes looked up
+    '''
+    def lookup16(self):
+        return self.lookup(2)
+
+    '''
     Lookus up a byte and unpacks it into an unsigned integer
     @return int 8-bits long unsigned integer
     '''
-    def lookupUnpackUint8(self):
-        return int.from_bytes(self.lookup8(), byteorder=self.endian, signed=False)
+    def lookupUnpackUint8(self, endian=None):
+        if endian is None:
+            return int.from_bytes(self.lookup8(), byteorder=self.endian, signed=False)
+        else:
+            return int.from_bytes(self.lookup8(), byteorder=endian, signed=False)
 
     '''
     Appends data to the end of the stream
@@ -153,8 +177,11 @@ class Reading():
     @param  idx     Index of the stream to insert data
     @param  num     Integer number to be inserted
     '''
-    def packInsertUint16(self, idx, num):
-        self.insert(idx, pack("H", num))
+    def packInsertUint16(self, idx, num, endian=None):
+        if endian is None:
+            self.insert(idx, pack(self.structEndian[self.endian] + "H", num))
+        else:
+            self.insert(idx, pack(self.structEndian[endian] + "H", num))
 
     '''
     Replaces data in the stream, overwriting what was stored in the place previously
