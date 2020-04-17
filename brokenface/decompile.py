@@ -2,7 +2,10 @@
 
 import argparse
 import logging
-from os.path import realpath
+
+from pathlib import Path
+from os import remove
+from sys import stdout, stderr
 
 from core import dso, codec
 
@@ -42,28 +45,77 @@ def getArgs():
 fnames, parseOnly, debug = getArgs()
 
 if debug:
-    logLevel = logging.DEBUG
+    logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s]: %(filename)s: %(lineno)d: %(message)s", stream=stdout)
 else:
-    logLevel = logging.INFO
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s]: %(filename)s: %(lineno)d: %(message)s", stream=stdout)
 
-success = 0
+success = []
+failed = []
 
-for f in fnames:
-    myFile = dso.File(realpath(f))
-    myFile.parse()
+for path in [Path(f) for f in fnames]:
+    logging.info("Decompiling file: {}".format(path.name))
+
+    logging.info("Parsing file: {}".format(path.name))
+    try:
+        myFile = dso.File(path)
+        myFile.parse()
+    except Exception as e:
+        logging.error("Failed to parse file: {}: Got exception: {}".format(path.name, repr(e)))
+        failed.append(path)
+        continue
+
+    logging.info("Successfully parsed file: {}".format(path.name))
 
     if parseOnly:
-        with open(myFile.name + ".txt", "w") as fd:
+        outPath = path.with_suffix(path.suffix + ".cs")
+        with open(outPath, "w") as fd:
             myFile.dump(sink=fd)
-    else:
-        decoder = codec.Decoding(myFile, logLevel=logLevel)
 
-        if decoder.decode():
-            success += 1
+        logging.info("Parse only option is enabled: Output stored in: {}".format(outPath))
+        success.append(path)
+    else:
+        logging.info("Decoding file: {}".format(path.name))
+        try:
+            decoder = codec.Decoding(myFile)
+            decoder.decode()
+        except Exception as e:
+            logging.error("Failed to decode file: {}: Got exception: {}".format(path.name, repr(e)))
+            failed.append(path)
+            continue
+
+        logging.info("Successfully decoded file: {}".format(path.name))
 
         decoder.tree.rewind()
 
-        with open(realpath(f) + ".txt", "w") as fd:
-            decoder.tree.dump(sink=fd)
+        if path.suffix == ".cso" or path.suffix == ".dso":
+            outPath = path.with_suffix(".cs")
+        else:
+            outPath = path.with_suffix(path.suffix + ".cs")
 
-print("Successfully decompiled {} out of {} input files".format(success, len(fnames)))
+        logging.info("Formatting file: {}".format(path.name))
+        try:
+            with open(outPath, "w") as fd:
+                decoder.tree.dump(sink=fd)
+        except Exception as e:
+            logging.error("Failed to format file: {}: Got exception: {}".format(path.name, repr(e)))
+            failed.append(path)
+
+            if outPath.is_file():
+                remove(outPath)
+
+            continue
+
+        logging.info("Successfully formatted file: {}".format(path.name))
+
+        logging.info("Successfully decompiled file: {}".format(path.name))
+        logging.info("Output stored in: {}".format(outPath))
+
+        success.append(path)
+
+if failed:
+    logging.info("The following files failed to be decompiled:")
+
+    for path in failed:
+        logging.info(str(path))
+
+logging.info("Successfully decompiled {} out of {} input files".format(len(success), len(fnames)))

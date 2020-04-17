@@ -1,5 +1,5 @@
 from sys import stdout
-from os.path import basename, getsize
+from os.path import getsize
 from util import binary
 
 '''
@@ -218,7 +218,7 @@ class File():
         self.path = path
 
         # Save file name:
-        self.name = basename(path)
+        self.name = path.name
 
         # Dump contents to a binary reader:
         with open(path, "rb") as fd:

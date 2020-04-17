@@ -56,11 +56,10 @@ class StringStack(list):
 
 
 class Decoding:
-    def __init__(self, dsoFile, inFunction=0, offset=0, logLevel=logging.DEBUG, sink=stdout):
+    def __init__(self, dsoFile, inFunction=0, offset=0):
         self.file = dsoFile
         self.inFunction = inFunction
         self.offset = offset
-        self.sink = sink
 
         self.curvar = None
         self.curobj = None
@@ -83,24 +82,14 @@ class Decoding:
 
         self.endBlock = {}
 
-        logging.basicConfig(level=logLevel, format="[%(levelname)s] %(lineno)d: %(message)s", stream=sink)
-
     def updateIP(self):
         self.ip = self.file.byteCode.pointer
 
     def getCode(self):
-        try:
-            return self.file.byteCode.getCode()
-        except IndexError as e:
-            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.file.byteCode.pointer))
-            quit()
+        return self.file.byteCode.getCode()
 
     def lookupCode(self):
-        try:
-            return self.file.byteCode.lookupCode()
-        except IndexError as e:
-            logging.error("IP: {}: {}: Unable to access code: {}".format(self.ip, repr(e), self.file.byteCode.pointer))
-            quit()
+        return self.file.byteCode.lookupCode()
 
     def getUint(self):
         return self.file.byteCode.getUint()
@@ -109,21 +98,13 @@ class Decoding:
         return self.file.byteCode.getStringOffset()
 
     def getGlobalStringByOffset(self, offset):
-        try:
-            return self.file.globalStringTable[offset]
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access global string table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        return self.file.globalStringTable[offset]
 
     def getGlobalString(self):
         return self.getGlobalStringByOffset(self.getStringOffset())
 
     def getFunctionStringByOffset(self, offset):
-        try:
-            return self.file.functionStringTable[offset]
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access function string table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        return self.file.functionStringTable[offset]
 
     def getFunctionString(self):
         return self.getFunctionStringByOffset(self.getStringOffset())
@@ -138,18 +119,10 @@ class Decoding:
         return self.getStringByOffset(self.getStringOffset())
 
     def setGlobalString(self, offset, string):
-        try:
-            self.file.globalStringTable[offset] = string
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access global string table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        self.file.globalStringTable[offset] = string
 
     def setFunctionString(self, offset, string):
-        try:
-            self.file.functionStringTable[offset] = string
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access function string table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        self.file.functionStringTable[offset] = string
 
     def setString(self, offset, string):
         if self.inFunction and self.file.functionStringTable:
@@ -161,21 +134,13 @@ class Decoding:
         return self.file.byteCode.getFloatOffset()
 
     def getGlobalFloatByOffset(self, offset):
-        try:
-            return self.file.globalFloatTable[offset]
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access global float table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        return self.file.globalFloatTable[offset]
 
     def getGlobalFloat(self):
         return self.getGlobalFloatByOffset(self.getFloatOffset())
 
     def getFunctionFloatByOffset(self, offset):
-        try:
-            return self.file.functionFloatTable[offset]
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access function float table at given offset: {}".format(self.ip, repr(e), hex(offset)))
-            quit()
+        return self.file.functionFloatTable[offset]
 
     def getFunctionFloat(self):
         return self.getFunctionFloatByOffset(self.getFloatOffset())
@@ -281,7 +246,7 @@ class Decoding:
         logging.debug("IP: {}: {}: End object".format(self.ip, self.dumpInstruction()))
 
     def opJmpiffnot(self):
-        target = self.file.byteCode.idxTable[self.getCode()]
+        target = self.file.byteCode.idxTable[self.getCode()] - self.offset
         condition = self.fltStack.pop()
 
         if target > self.ip:
@@ -303,7 +268,7 @@ class Decoding:
         logging.debug("IP: {}: {}: Jump if float condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpifnot(self):
-        target = self.file.byteCode.idxTable[self.getCode()]
+        target = self.file.byteCode.idxTable[self.getCode()] - self.offset
         condition = self.intStack.pop()
 
         if target > self.ip:
@@ -325,7 +290,7 @@ class Decoding:
         logging.debug("IP: {}: {}: Jump if uint/boolean condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpiff(self):
-        target = self.file.byteCode.idxTable[self.getCode()]
+        target = self.file.byteCode.idxTable[self.getCode()] - self.offset
         condition = self.fltStack.pop()
 
         if target > self.ip:
@@ -347,7 +312,7 @@ class Decoding:
         logging.debug("IP: {}: {}: Jump if float condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpif(self):
-        target = self.file.byteCode.idxTable[self.getCode()]
+        target = self.file.byteCode.idxTable[self.getCode()] - self.offset
         condition = self.intStack.pop()
 
         if target > self.ip:
@@ -369,8 +334,7 @@ class Decoding:
         logging.debug("IP: {}: {}: Jump if uint/boolean condition met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmp(self):
-        code = self.getCode()
-        target = self.file.byteCode.idxTable[code]
+        target = self.file.byteCode.idxTable[self.getCode()] - self.offset
 
         if target > self.file.byteCode.pointer:
             elseStatement = torque.Else()
@@ -893,8 +857,6 @@ class Decoding:
     }
 
     def decode(self):
-        logging.info("Decoding file: {}".format(self.file.name))
-
         while self.ip < self.file.byteCode.binLen:
             try:
                 if self.ip in self.endBlock:
@@ -910,17 +872,8 @@ class Decoding:
                 self.callStack.append(self.callOp[opCode])
                 self.updateIP()
             except Exception as e:
-                if e.__class__ is KeyError:
-                    if opCode == 0xcdcd:
-                        logging.info("IP: {}: Got (supposed) end control sequence: Terminating".format(self.ip))
-                        return True
-                    else:
-                        logging.error("IP: {}: {}: Unrecognized operation code: {}: Terminating".format(self.ip, repr(e), opCode))
-                        return False
+                if e.__class__ is KeyError and opCode == 0xcdcd:
+                    logging.debug("IP: {}: Got (supposed) end control sequence: Terminating".format(self.ip))
+                    return
                 else:
-                    logging.error("IP: {}: Failed to decode file: {}".format(self.ip, self.file.name))
-                    return False
-
-        logging.info("IP: {}: Successfully decoded file: {}".format(self.ip, self.file.name))
-
-        return True
+                    raise e
