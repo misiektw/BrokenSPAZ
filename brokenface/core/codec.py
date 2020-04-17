@@ -56,7 +56,7 @@ class StringStack(list):
 
 
 class Decoding:
-    def __init__(self, dsoFile, inFunction=0, offset=0, sink=stdout):
+    def __init__(self, dsoFile, inFunction=0, offset=0, logLevel=logging.DEBUG, sink=stdout):
         self.file = dsoFile
         self.inFunction = inFunction
         self.offset = offset
@@ -83,7 +83,7 @@ class Decoding:
 
         self.endBlock = {}
 
-        logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] %(lineno)d: %(message)s", stream=sink)
+        logging.basicConfig(level=logLevel, format="[%(levelname)s] %(lineno)d: %(message)s", stream=sink)
 
     def updateIP(self):
         self.ip = self.file.byteCode.pointer
@@ -893,26 +893,34 @@ class Decoding:
     }
 
     def decode(self):
-            while self.ip < self.file.byteCode.binLen:
-                try:
-                    if self.ip in self.endBlock:
-                        for end in self.endBlock.pop(self.ip):
-                            self.tree.focusParent()
-                            if isinstance(end, torque.If) and end.elseHandle is not None:
-                                self.tree.append(end.elseHandle)
-                                self.tree.focusChild()
-                            elif isinstance(end, torque.FuncDecl):
-                                self.inFunction -= 1
-                    opCode = self.getCode()
-                    self.callOp[opCode](self)
-                    self.callStack.append(self.callOp[opCode])
-                    self.updateIP()
-                except KeyError as e:
+        logging.info("Decoding file: {}".format(self.file.name))
+
+        while self.ip < self.file.byteCode.binLen:
+            try:
+                if self.ip in self.endBlock:
+                    for end in self.endBlock.pop(self.ip):
+                        self.tree.focusParent()
+                        if isinstance(end, torque.If) and end.elseHandle is not None:
+                            self.tree.append(end.elseHandle)
+                            self.tree.focusChild()
+                        elif isinstance(end, torque.FuncDecl):
+                            self.inFunction -= 1
+                opCode = self.getCode()
+                self.callOp[opCode](self)
+                self.callStack.append(self.callOp[opCode])
+                self.updateIP()
+            except Exception as e:
+                if e.__class__ is KeyError:
                     if opCode == 0xcdcd:
-                        logging.info("IP: {}: Got end control sequence: Terminating".format(self.ip))
-                        return
+                        logging.info("IP: {}: Got (supposed) end control sequence: Terminating".format(self.ip))
+                        return True
                     else:
                         logging.error("IP: {}: {}: Unrecognized operation code: {}: Terminating".format(self.ip, repr(e), opCode))
-                        return
+                        return False
+                else:
+                    logging.error("IP: {}: Failed to decode file: {}".format(self.ip, self.file.name))
+                    return False
 
-            logging.info("IP: {}: Finished decoding: Terminating".format(self.ip))
+        logging.info("IP: {}: Successfully decoded file: {}".format(self.ip, self.file.name))
+
+        return True
