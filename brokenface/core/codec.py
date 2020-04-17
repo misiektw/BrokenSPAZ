@@ -580,7 +580,7 @@ class Decoding:
             name = self.curfield
         else:
             # Assignment to field of current object:
-            name = self.curobj + "." + self.curfield
+            name = torque.ConcatDot([self.curobj, self.curfield])
 
         value = self.intStack[-1]
 
@@ -596,7 +596,7 @@ class Decoding:
             name = self.curfield
         else:
             # Assignment to field of current object:
-            name = self.curobj + "." + self.curfield
+            name = torque.ConcatDot([self.curobj, self.curfield])
 
         value = self.fltStack[-1]
 
@@ -612,7 +612,7 @@ class Decoding:
             name = self.curfield
         else:
             # Assignment to field of current object:
-            name = self.curobj + "." + self.curfield
+            name = torque.ConcatDot([self.curobj, self.curfield])
 
         value = self.strStack[-1]
 

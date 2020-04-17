@@ -160,6 +160,11 @@ class ConcatComma(Operation):
     def __str__(self):
         return ", ".join(str(op) for op in self.operands)
 
+
+class ConcatDot(Operation):
+    def __str__(self):
+        return ".".join(str(op) for op in self.operands)
+
 def isConcatOp(op):
     return isinstance(op, Concat) or isinstance(op, ConcatNl) or isinstance(op, ConcatSpc) or isinstance(op, ConcatTab) or isinstance(op, ConcatComma)
 
