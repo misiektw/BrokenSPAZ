@@ -470,11 +470,6 @@ class Decoding:
 
         logging.debug("IP: {}: {}: Invert sign of float".format(self.ip, self.dumpInstruction()))
 
-    def opSetcurvarArray(self):
-        self.curvar = torque.ArrayAccess(self.strStack[-1])
-
-        logging.debug("IP: {}: {}: Set current array variable".format(self.ip, self.dumpInstruction()))
-
     def opSetcurvar(self):
         offset = self.getStringOffset()
         string = self.getGlobalStringByOffset(offset)
@@ -490,6 +485,11 @@ class Decoding:
         self.curvar = string
 
         logging.debug("IP: {}: {}: Set current variable: {}".format(self.ip, self.dumpInstruction(), self.curvar))
+
+    def opSetcurvarArray(self):
+        self.curvar = torque.ArrayAccess(self.strStack[-1])
+
+        logging.debug("IP: {}: {}: Set current array variable".format(self.ip, self.dumpInstruction()))
 
     def opLoadvarUint(self):
         self.intStack.append(self.curvar)
@@ -553,6 +553,11 @@ class Decoding:
         self.curfield = self.getGlobalString()
 
         logging.debug("IP: {}: {}: Set current field: {}".format(self.ip, self.dumpInstruction(), self.curfield))
+
+    def opSetcurfieldArray(self):
+        self.curfield = torque.ArrayAccess(self.strStack[-1])
+
+        logging.debug("IP: {}: {}: Set current array field".format(self.ip, self.dumpInstruction()))
 
     def opLoadfieldUint(self):
         self.intStack.append(self.curfield)
@@ -821,7 +826,7 @@ class Decoding:
         50:     opSetcurobject,
         51:     opSetcurobjectNew,
         52:     opSetcurfield,
-
+        53:     opSetcurfieldArray,
         54:     opLoadfieldUint,
         55:     opLoadfieldFlt,
         56:     opLoadfieldStr,
