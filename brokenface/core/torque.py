@@ -1,18 +1,11 @@
 from sys import stdout
 
-def formatArgv(prefix, argv):
-    if len(argv) > 0:
-        form = str(argv[0])
-        for i in range(1, len(argv)):
-            form += ", " + str(argv[i])
-
-        return prefix + "(" + form + ")"
-    else:
-        return prefix + "()"
-
 class Operation:
     def __init__(self, operands):
         self.operands = operands
+
+    def __eq__(self, obj):
+        return str(self) == str(obj)
 
 
 class Add(Operation):
@@ -58,8 +51,9 @@ class Not(Operation):
             notEqualOperation = StringNotEqual(equalOperands)
             # Call not equal operation instead:
             return str(notEqualOperation)
+        # TODO: Cover more cases
         else:
-            return "!" + str(self.operands[0])
+            return "!(" + str(self.operands[0]) + ")"
 
 
 class Equal(Operation):
@@ -161,12 +155,17 @@ class ConcatSpc(Operation):
     def __str__(self):
         return " SPC ".join(str(op) for op in self.operands)
 
+
+class ConcatComma(Operation):
+    def __str__(self):
+        return ", ".join(str(op) for op in self.operands)
+
 def isConcatOp(op):
-    return isinstance(op, Concat) or isinstance(op, ConcatNl) or isinstance(op, ConcatSpc) or isinstance(op, ConcatTab)
+    return isinstance(op, Concat) or isinstance(op, ConcatNl) or isinstance(op, ConcatSpc) or isinstance(op, ConcatTab) or isinstance(op, ConcatComma)
 
 class ArrayAccess(Operation):
     def __str__(self):
-        return str(self.operands[0]) + "[" + formatArgv("", self.operands[1:]) + "]"
+        return str(self.operands[0]) + "[" + str(self.operands[1]) + "]"
 
 
 class Node:
@@ -253,7 +252,7 @@ class FuncCall(Node):
             # TODO: What if built dynamically?
             baseStr += str(self.objClass) + "."
 
-        return formatArgv(baseStr + self.name, self.argv)
+        return baseStr + self.name + "(" + str(ConcatComma(self.argv)) + ")"
 
 
 class FuncDecl(Node):
@@ -271,9 +270,9 @@ class FuncDecl(Node):
 
     def __str__(self):
         if self.namespace == "":
-            return "function " + formatArgv(self.name, self.argv)
+            return "function " + self.name + "(" + str(ConcatComma(self.argv)) + ")"
         else:
-            return "function " + formatArgv(self.namespace + "::" + self.name, self.argv)
+            return "function " + self.namespace + "::" + self.name + "(" + str(ConcatComma(self.argv)) + ")"
 
 
 class If(Node):
@@ -305,7 +304,7 @@ class ObjDecl(Node):
         self.carryIndent = 1
 
     def __str__(self):
-        return "new " + formatArgv(self.objType, self.argv)
+        return "new " + self.objType + "(" + str(ConcatComma(self.argv)) + ")"
 
 
 class Return(Node):
@@ -322,6 +321,18 @@ class Return(Node):
             return "return " + str(self.value)
 
 
+class While(Node):
+    def __init__(self, condition):
+        super().__init__()
+
+        self.condition = condition
+
+        self.carryIndent = 1
+
+    def __str__(self):
+        return "while (" + str(self.condition) + ")"
+
+
 class Tree:
     def __init__(self, root):
         self.root = root
@@ -330,6 +341,23 @@ class Tree:
 
     def append(self, node):
         self.curNode.append(node)
+
+    def replace(self, new):
+        old = self.curNode
+
+        parent = old.parent
+        children = old.children
+
+        if parent is not None:
+            parent.children[parent.children.index(old)] = new
+
+        for child in children:
+            child.parent = new
+
+        new.parent = parent
+        new.children = children
+
+        self.curNode = new
 
     def rewind(self):
         self.curNode = self.root

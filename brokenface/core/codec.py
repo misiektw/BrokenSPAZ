@@ -4,11 +4,6 @@ import logging
 from core import dso, torque
 
 class StringStack(list):
-    def __init__(self):
-        super().__init__()
-
-        self.previousTops = []
-
     def load(self, string):
         if self:
             self[-1] = string
@@ -24,9 +19,8 @@ class StringStack(list):
             elif ch == " ":
                 self.append(torque.ConcatSpc([self.pop()]))
             elif ch == ",":
-                self.append(torque.Concat([self.pop(), "\",\""]))
+                self.append(torque.ConcatComma([self.pop()]))
             elif ch == "\x00":
-                print("Appending comp")
                 self.append(torque.StringEqual([self.pop()]))
             else:
                 self.append(torque.Concat([self.pop(), "\"" + ch + "\""]))
@@ -79,11 +73,13 @@ class Decoding:
         self.fltStack = []
         self.strStack = StringStack()
 
+        self.treeStack = []
+
         self.tree = torque.Tree(torque.File(self.file.name))
 
         self.ip = 0
 
-        self.previousCall = None
+        self.callStack = []
 
         self.endBlock = {}
 
@@ -241,9 +237,6 @@ class Decoding:
         self.inFunction += 1
 
     def opCreateObject(self):
-        # A 0 has been pushed to the int stack because it will contain a handle to the object:
-        assert self.intStack.pop() == 0
-
         parent = self.getString()
         isDataBlock = self.getCode()
         end = self.file.byteCode.idxTable[self.getCode()]
@@ -258,105 +251,120 @@ class Decoding:
             if isinstance(string, str) and string[0] != "%":
                 string = "%" + string
 
-        self.oldTree = self.tree
+        self.treeStack.append(self.tree)
         self.tree = torque.Tree(torque.ObjDecl(parent, isDataBlock, argv))
 
         logging.debug("IP: {}: {}: Create object: {}, {}, {}".format(self.ip, self.dumpInstruction(), parent, isDataBlock, end))
 
     def opAddObject(self):
-        # TODO: What is this for?
-        self.getCode()
+        placeAtRoot = self.getCode()
 
-        self.intStack.append(self.tree.root)
+        if placeAtRoot:
+            self.intStack[-1] = self.tree.root
+        else:
+            self.intStack.append(self.tree.root)
 
         logging.debug("IP: {}: {}: Add object".format(self.ip, self.dumpInstruction()))
 
     def opEndObject(self):
-        # TODO: What is this for?
-        self.getCode()
-
         # Restore old tree:
-        self.tree = self.oldTree
+        self.tree = self.treeStack.pop()
+
+        if self.callStack[-2] is Decoding.opCreateObject and self.callStack[-1] is Decoding.opAddObject:
+            self.intStack[-1].carryIndent = 0
+
+        placeAtRoot = self.getCode()
+
+        if not placeAtRoot:
+            self.tree.append(self.intStack.pop())
 
         logging.debug("IP: {}: {}: End object".format(self.ip, self.dumpInstruction()))
 
     def opJmpiffnot(self):
         target = self.file.byteCode.idxTable[self.getCode()]
-
-        if target < self.ip:
-            raise NotImplementedError("While/For loops not implemented yet")
-
         condition = self.fltStack.pop()
 
-        ifStatement = torque.If(condition)
+        if target > self.ip:
+            ifStatement = torque.If(condition)
 
-        if target not in self.endBlock:
-            self.endBlock[target] = []
+            if target not in self.endBlock:
+                self.endBlock[target] = []
 
-        self.endBlock[target].append(ifStatement)
+            self.endBlock[target].append(ifStatement)
 
-        self.tree.append(ifStatement)
-        self.tree.focusChild()
+            self.tree.append(ifStatement)
+            self.tree.focusChild()
+        else:
+            if condition != self.tree.curNode.condition:
+                raise ValueError("Loop condition mismatch")
+
+            self.tree.replace(torque.While(torque.Not([condition])))
 
         logging.debug("IP: {}: {}: Jump if float condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpifnot(self):
         target = self.file.byteCode.idxTable[self.getCode()]
-
-        if target < self.ip:
-            raise NotImplementedError("While/For loops not implemented yet")
-
         condition = self.intStack.pop()
 
-        ifStatement = torque.If(condition)
+        if target > self.ip:
+            ifStatement = torque.If(condition)
 
-        if target not in self.endBlock:
-            self.endBlock[target] = []
+            if target not in self.endBlock:
+                self.endBlock[target] = []
 
-        self.endBlock[target].append(ifStatement)
+            self.endBlock[target].append(ifStatement)
 
-        self.tree.append(ifStatement)
-        self.tree.focusChild()
+            self.tree.append(ifStatement)
+            self.tree.focusChild()
+        else:
+            if condition != self.tree.curNode.condition:
+                raise ValueError("Loop condition mismatch")
+
+            self.tree.replace(torque.While(torque.Not([condition])))
 
         logging.debug("IP: {}: {}: Jump if uint/boolean condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpiff(self):
         target = self.file.byteCode.idxTable[self.getCode()]
-
-        if target < self.ip:
-            raise NotImplementedError("While/For loops not implemented yet")
-
         condition = self.fltStack.pop()
 
-        ifStatement = torque.If(torque.Not([condition]))
+        if target > self.ip:
+            ifStatement = torque.If(condition)
 
-        if target not in self.endBlock:
-            self.endBlock[target] = []
+            if target not in self.endBlock:
+                self.endBlock[target] = []
 
-        self.endBlock[target].append(ifStatement)
+            self.endBlock[target].append(ifStatement)
 
-        self.tree.append(ifStatement)
-        self.tree.focusChild()
+            self.tree.append(ifStatement)
+            self.tree.focusChild()
+        else:
+            if condition != self.tree.curNode.condition:
+                raise ValueError("Loop condition mismatch")
+
+            self.tree.replace(torque.While(torque.Not([condition])))
 
         logging.debug("IP: {}: {}: Jump if float condition not met to: {}".format(self.ip, self.dumpInstruction(), target))
 
     def opJmpif(self):
         target = self.file.byteCode.idxTable[self.getCode()]
-
-        if target < self.ip:
-            raise NotImplementedError("While/For loops not implemented yet")
-
         condition = self.intStack.pop()
 
-        ifStatement = torque.If(torque.Not([condition]))
+        if target > self.ip:
+            ifStatement = torque.If(condition)
 
-        if target not in self.endBlock:
-            self.endBlock[target] = []
+            if target not in self.endBlock:
+                self.endBlock[target] = []
 
-        self.endBlock[target].append(ifStatement)
+            self.endBlock[target].append(ifStatement)
 
-        self.tree.append(ifStatement)
-        self.tree.focusChild()
+            self.tree.append(ifStatement)
+            self.tree.focusChild()
+        else:
+            if condition != self.tree.curNode.condition:
+                raise ValueError("Loop condition mismatch")
+
+            self.tree.replace(torque.While(torque.Not([condition])))
 
         logging.debug("IP: {}: {}: Jump if uint/boolean condition met to: {}".format(self.ip, self.dumpInstruction(), target))
 
@@ -374,7 +382,7 @@ class Decoding:
 
             self.tree.getFocused().elseHandle = elseStatement
         else:
-            raise NotImplementedError("While/For loops not implemented yet")
+            raise NotImplementedError("Backward jump not implemented for OP_JMP")
 
         logging.debug("IP: {}: {}: Jump to: {}".format(self.ip, self.dumpInstruction(), target))
 
@@ -659,7 +667,7 @@ class Decoding:
         popd = self.strStack.pop()
 
         # Return value being discarded means procedure call:
-        if isinstance(popd, torque.FuncCall) and self.previousCall is Decoding.opCallfunc:
+        if isinstance(popd, torque.FuncCall) and self.callStack[-1] is Decoding.opCallfunc:
             self.tree.append(popd)
 
         logging.debug("IP: {}: {}: Pop string out".format(self.ip, self.dumpInstruction()))
@@ -693,7 +701,7 @@ class Decoding:
         popd = self.intStack.pop()
 
         # Return value being discarded means object declared, but not assigned:
-        if isinstance(popd, torque.ObjDecl) and self.previousCall is Decoding.opEndObject:
+        if isinstance(popd, torque.ObjDecl) and self.callStack[-1] is Decoding.opEndObject:
             self.tree.append(popd)
 
         logging.debug("IP: {}: {}: Pop uint out".format(self.ip, self.dumpInstruction()))
@@ -885,20 +893,26 @@ class Decoding:
     }
 
     def decode(self):
-        try:
             while self.ip < self.file.byteCode.binLen:
-                if self.ip in self.endBlock:
-                    for end in self.endBlock.pop(self.ip):
-                        self.tree.focusParent()
-                        if isinstance(end, torque.If) and end.elseHandle is not None:
-                            self.tree.append(end.elseHandle)
-                            self.tree.focusChild()
-                        elif isinstance(end, torque.FuncDecl):
-                            self.inFunction -= 1
-                opCode = self.getCode()
-                self.callOp[opCode](self)
-                self.previousCall = self.callOp[opCode]
-                self.updateIP()
-        except KeyError as e:
-            logging.error("IP: {}: {}: Unable to access current operation: {}".format(self.ip, repr(e), opCode))
-            return
+                try:
+                    if self.ip in self.endBlock:
+                        for end in self.endBlock.pop(self.ip):
+                            self.tree.focusParent()
+                            if isinstance(end, torque.If) and end.elseHandle is not None:
+                                self.tree.append(end.elseHandle)
+                                self.tree.focusChild()
+                            elif isinstance(end, torque.FuncDecl):
+                                self.inFunction -= 1
+                    opCode = self.getCode()
+                    self.callOp[opCode](self)
+                    self.callStack.append(self.callOp[opCode])
+                    self.updateIP()
+                except KeyError as e:
+                    if opCode == 0xcdcd:
+                        logging.info("IP: {}: Got end control sequence: Terminating".format(self.ip))
+                        return
+                    else:
+                        logging.error("IP: {}: {}: Unrecognized operation code: {}: Terminating".format(self.ip, repr(e), opCode))
+                        return
+
+            logging.info("IP: {}: Finished decoding: Terminating".format(self.ip))
