@@ -179,6 +179,9 @@ class Node:
         self.children = []
         self.carryIndent = 0
 
+    def __eq__(self, obj):
+        return str(self) == str(obj)
+
     def append(self, child):
         child.parent = self
         self.children.append(child)
