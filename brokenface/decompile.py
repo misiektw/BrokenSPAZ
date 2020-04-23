@@ -67,7 +67,7 @@ for path in [Path(f) for f in fnames]:
     logging.info("Successfully parsed file: {}".format(path.name))
 
     if parseOnly:
-        outPath = path.with_suffix(path.suffix + ".cs")
+        outPath = path.with_suffix(path.suffix + ".txt")
         with open(outPath, "w") as fd:
             myFile.dump(sink=fd)
 
@@ -87,15 +87,12 @@ for path in [Path(f) for f in fnames]:
 
         decoder.tree.rewind()
 
-        if path.suffix == ".cso" or path.suffix == ".dso":
-            outPath = path.with_suffix(".cs")
-        else:
-            outPath = path.with_suffix(path.suffix + ".cs")
+        outPath = path.with_suffix(path.suffix + ".cs")
 
         logging.info("Formatting file: {}".format(path.name))
         try:
             with open(outPath, "w") as fd:
-                decoder.tree.dump(sink=fd)
+                decoder.tree.format(sink=fd)
         except Exception as e:
             logging.error("Failed to format file: {}: Got exception: {}".format(path.name, repr(e)))
             failed.append(path)

@@ -1,12 +1,12 @@
 from struct import pack, unpack
 
 '''
-Generic methods for reading and unpacking bytes and words from a byte stream
+Generic methods for manipulating byte streams
 '''
 class Reading():
     '''
     Constructs a Reading object
-    @param  byteStream  Bytes to be copied
+    @param  byteStream  Byte stream to be processed
     @param  endian      Endianess of byte stream
     '''
     def __init__(self, byteStream, endian):
@@ -59,16 +59,19 @@ class Reading():
 
     '''
     Reads bytes until a null byte is found and return the resultant string
+    @param  max     Maximum amount of bytes to be read
     @return string  String read
     '''
-    def readString(self):
+    def readString(self, max):
         byteStream = b''
+        idx = 1
         rd = self.read8()
-        while rd != b'\x00':
+        while idx <= max and rd != b'\x00':
             byteStream += rd
             rd = self.read8()
+            idx += 1
 
-        return byteStream.decode()
+        return byteStream
 
     '''
     Reads a byte and unpacks it into an unsigned integer
@@ -141,7 +144,7 @@ class Reading():
 
     '''
     Lookus up a byte and unpacks it into an unsigned integer
-    @return int 8-bits long unsigned integer
+    @return int 1-byte long unsigned integer
     '''
     def lookupUnpackUint8(self, endian=None):
         if endian is None:
@@ -150,38 +153,21 @@ class Reading():
             return int.from_bytes(self.lookup8(), byteorder=endian, signed=False)
 
     '''
+    Lookus up two bytes and unpacks them into an unsigned integer
+    @return int 2-bytes long unsigned integer
+    '''
+    def lookupUnpackUint16(self, endian=None):
+        if endian is None:
+            return int.from_bytes(self.lookup16(), byteorder=self.endian, signed=False)
+        else:
+            return int.from_bytes(self.lookup16(), byteorder=endian, signed=False)
+
+    '''
     Appends data to the end of the stream
     @param  data    Binary data to be appended
     '''
     def append(self, data):
         self.byteStream += data
-
-    '''
-    Inserts data in the stream
-    @param  idx     Index of the stream to insert data
-    @param  data    Binary data to be inserted
-    '''
-    def insert(self, idx, data):
-        self.byteStream = self.byteStream[:idx] + data + self.byteStream[idx:]
-
-    '''
-    Packs an 1-byte long unsigned integer and inserts it in the stream
-    @param  idx     Index of the stream to insert data
-    @param  num     Integer number to be inserted
-    '''
-    def packInsertUint8(self, idx, num):
-        self.insert(idx, pack("B", num))
-
-    '''
-    Packs a 2-byte long unsigned integer and inserts it in the stream
-    @param  idx     Index of the stream to insert data
-    @param  num     Integer number to be inserted
-    '''
-    def packInsertUint16(self, idx, num, endian=None):
-        if endian is None:
-            self.insert(idx, pack(self.structEndian[self.endian] + "H", num))
-        else:
-            self.insert(idx, pack(self.structEndian[endian] + "H", num))
 
     '''
     Replaces data in the stream, overwriting what was stored in the place previously

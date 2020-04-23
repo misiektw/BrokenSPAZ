@@ -15,14 +15,42 @@ class StringTable(dict):
         # Inherit all characteristics of a dictionary:
         super().__init__(self)
 
+        # Get length, in bytes, of this field:
         self.binLen = binReader.unpackUint32()
 
-        # Split all strings, compute their offsets and add the entries to the dictionary:
+        # Store every string and their respective offsets:
         offset = 0
         while offset < self.binLen:
-            self[offset] = binReader.readString()
+            self[offset] = binReader.readString(self.binLen - offset - 1)
             offset += len(self[offset]) + 1
 
+    '''
+    Gets a string or substring of the table
+    @param  key     Key of entry to be retrieved
+    '''
+    def __getitem__(self, key):
+        # If out of bounds:
+        if key < 0 or key >= self.binLen:
+            raise KeyError
+
+        try:
+            # Try default dict operator:
+            return super().__getitem__(key)
+        except KeyError:
+            # If null byte:
+            if key + 1 in self:
+                return b''
+
+            # Decrease until a valid key is found:
+            k = key
+            while k >= 0 and k not in self:
+                k -= 1
+
+            if k < 0:
+                raise KeyError
+            else:
+                # Return substring:
+                return self[k][key-k:]
 
 '''
 Table of floating point numbers, represented as a list of floats
@@ -36,40 +64,46 @@ class FloatTable(list):
         # Inherit all characteristics of a list:
         super().__init__(self)
 
-        self.binLen = binReader.unpackUint32()
+        # Get length, in entries, of this field:
+        length = binReader.unpackUint32()
 
-        for _ in range(0, self.binLen):
+        # Store floats:
+        for _ in range(0, length):
             self.append(binReader.unpackFloat32())
 
 
 '''
-Reference stream that constitutes the script, represented as a BinaryReader
+Code stream that constitutes the script, represented as a BinaryReader
 '''
 class ByteCode(binary.Reading):
     '''
-    Constructs a ByteCode object (list of integers)
-    @param  binReader    Binary reader to parse the bytecode from
-    @param  ctrlCode     Special code that indicates that the following data is part of the code
+    Constructs a ByteCode object
+    @param  binReader   Binary reader to parse the bytecode from
+    @param  extCtrlCode Control code to indicate 2-bytes long code value
+    @param  endCtrlCode Control code to indicate EOF
     '''
-    def __init__(self, binReader, ctrlCode=0xff):
+    def __init__(self, binReader, extCtrlCode=0xff, endCtrlCode=0xcdcd):
         # Inherit all characteristics of binary.Reading:
         super().__init__(b'', "little")
 
-        self.ctrlCode = ctrlCode
-        self.ctrlByte = bytes([ctrlCode])
+        self.extCtrlCode = extCtrlCode
+        self.endCtrlCode = endCtrlCode
 
-        # A list of indexes of the codes into the stream, so that the bytecode can be accessed by code and not only by byte:
-        self.idxTable = []
+        self.extCtrlByte = bytes([extCtrlCode])
 
+        # For indexing the bytecode by code:
+        self.idxTable = [] # List of code indices
         self.codLen = binReader.unpackUint32() # Number of codes
 
-        startPtr = binReader.pointer
+        # Get start offset of bytecode:
+        offset = binReader.pointer
 
         for _ in range(0, self.codLen):
-            # Get byte:
+            # Read byte:
             bt = binReader.read8()
 
-            if bt == self.ctrlByte:
+            # If extension control code:
+            if bt == self.extCtrlByte:
                 # Get next 2 bytes as part of same code:
                 bt += binReader.read16()
 
@@ -77,7 +111,7 @@ class ByteCode(binary.Reading):
             self.append(bt)
 
             # Store the index of the code in the stream:
-            self.idxTable.append(binReader.pointer - startPtr - 1)
+            self.idxTable.append(binReader.pointer - offset - 1)
 
         self.binLen = len(self.byteStream) # Number of bytes
 
@@ -88,39 +122,50 @@ class ByteCode(binary.Reading):
         # Get code:
         code = self.unpackUint8()
 
-        if code == self.ctrlCode:
+        # If extension control code:
+        if code == self.extCtrlCode:
             # Get the actual 2-bytes long code:
             code = self.unpackUint16()
         
         return code
 
     '''
-    Same as getCode, but without moving the pointer
+    Retrieves next two bytes as uint
     '''
-    def lookupCode(self):
-        return self.lookupUnpackUint8()
-
     def getUint(self):
-        # If control byte:
-        if self.lookupStringOffset()[1] == self.ctrlCode:
-            # Discard two bytes:
+        # If first byte is extension control code:
+        if self.lookup8() == self.extCtrlByte:
+            # Discard first byte:
+            self.read8()
+            # Get 2-bytes long stream:
+            bt = self.read16()
+            # Discard byte:
+            self.read8()
+            # Append more two bytes:
+            bt += self.read16()
+            # Get 4-bytes long big endian unsigned integer:
+            return int.from_bytes(bt, byteorder="big", signed=False)
+        # If second byte is extension control code:
+        elif self.lookup16()[1] == self.extCtrlCode:
+            # Discard first two bytes:
             self.read16()
-            # Get 2-bytes long little endian integer:
+            # Get 2-bytes long big endian unsigned integer:
             return self.unpackUint16(endian="big")
         else:
-            # Get 2-bytes long big endian integer:
+            # Get 2-bytes long big endian unsigned integer:
             return self.unpackUint16(endian="big")
 
     '''
-    Retrieves the string offset currently pointed at
+    Retrieves next two bytes as string offset
     '''
     def getStringOffset(self):
-        # If control byte:
-        if self.lookupStringOffset()[1] == self.ctrlCode:
+        # If second byte is extension control code:
+        if self.lookup16()[1] == self.extCtrlCode:
             # Discard two bytes:
             self.read16()
             # Get 2-bytes long little endian offset:
             return self.unpackUint16()
+        # If patched string:
         elif self.pointer in self.patches:
             # Get 2-bytes long little endian offset:
             return self.unpackUint16()
@@ -128,36 +173,35 @@ class ByteCode(binary.Reading):
             # Get 2-bytes long big endian offset:
             return self.unpackUint16(endian="big")
 
-    def lookupStringOffset(self):
-        # String offsets are 2-bytes long, taking two codes:
-        return self.lookup16()
-
+    '''
+    Retrieves next two bytes as float offset
+    '''
     def getFloatOffset(self):
         return self.unpackUint16(endian="big")
 
     '''
     Dump chunk of bytecode
-    @param  start   Start code index of chunk
-    @param  end     End code index of chunk
+    @param  start   Start byte index of chunk
+    @param  end     End byte index of chunk
     '''
     def dump(self, start, end):
         return self.byteStream[start:end]
 
     '''
-    Patches the string offsets into the blank locations of the stream as described in the Identification Table
-    @param  identTable  Identification Table described in the file
+    Patches the string offsets into the locations listed in the IdentTable
+    @param  identTable  IdentTable described in the file
     '''
     def patchStrings(self, identTable):
         self.patches = []
         for offset, locations in identTable.items():
             for loc in locations:
-                self.replace(self.idxTable[loc], offset)
-                self.patches.append(self.idxTable[loc])
+                self.replace(self.idxTable[loc], offset) # Patch location (code index)
+                self.patches.append(self.idxTable[loc]) # List patched location (byte index)
 
 
 '''
 Identification Table that maps the strings to the opcode stream, represented as a dictionary where the keys are the offsets
-of the strings and the values are lists of indexes of the stream
+of the strings and the values are lists of indices of the stream
 '''
 class IdentTable(dict):
     '''
@@ -168,15 +212,17 @@ class IdentTable(dict):
         # Inherit all characteristics of a dictionary:
         super().__init__(self)
 
-        tableLen = binReader.unpackUint32()
+        # Get length, in entries, of this field:
+        length = binReader.unpackUint32()
 
         # For each entry of the table:
-        for _ in range(0, tableLen):
+        for _ in range(0, length):
             offset = binReader.read32()[:2] # Get offset field (offset is just 2-bytes long)
             count = binReader.unpackUint32() # Get count field
             self[offset] = []
             # For each location to patch:
             for _ in range(0, count):
+                # Store location into "offset" entry:
                 self[offset].append(binReader.unpackUint32())
 
 
@@ -246,7 +292,7 @@ class File():
         # Parse the Function Float Table:
         self.functionFloatTable = FloatTable(self.binReader)
 
-        # Parse the Code:
+        # Parse the ByteCode:
         self.byteCode = ByteCode(self.binReader)
 
         # Parse the Ident Table:
