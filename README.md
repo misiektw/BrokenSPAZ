@@ -20,6 +20,21 @@ All the source code was written in `python3` and tested in a `Debian bullseye` m
 
 ##   Usage
 
+The main script can be found in `bin/decompile`.
+
+
+```
+usage: decompile [-h] [--parse-only] [--debug] FILE_NAME [FILE_NAME ...]
+
+positional arguments:
+  FILE_NAME     name of the file to be decompiled
+
+optional arguments:
+  -h, --help    show this help message and exit
+  --parse-only  only parse the file and dump the structures
+  --debug       set logging level to DEBUG
+```
+
 ##   Flow
 
 While `Broken Synapse` is divided in a `parsing` and a `decompilation` stages, I opted for a three-stage flow scheme. The first stage is the same: `Parsing` the script file fields. Then, instead of a single stage for translating the `Bytecode` directly into text, I implemented a `decoding` stage that translates the `Bytecode` into an intermediary structure and a `formatting` stage that reads this structure and pretty-prints the source code.
