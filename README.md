@@ -2,10 +2,12 @@
 
 ##   TorqueScript Engine v. 1.7.5 DSO v.41 Decompiler (works with  Space Pirates and Zobies SPAZ)
 
-I was annoyed by debt mechanic, and devs said they will not change it. Well, I had to change it by myself.
-Unfortunately all decompilers I found failed to decompile reserchScreen.cs.dso, which has this mechanic.
-So I changed Scarface scripts to work with SPAZ. But after getting it to work I found out that I didn't need to decompile researchScreen just exec.cs.dso, and then add custom script to it just with two functions which apparently override default ones.
-Mod included in this repo if you want it.
+I was annoyed by debt mechanic, and dev said they will not change it. Well, I had to change it by myself.
+Unfortunately all decompilers I found have failed to decompile reserchScreen.cs.dso, which has this mechanic.
+So I changed Scarface scripts to work with SPAZ. 
+But after getting it to work I found out that I didn't need to decompile researchScreen after all. Just exec.cs.dso, and then add custom script to it just with two functions, which apparently override default ones. Beauty of this solution is that my scripts decompile exec.cs 100% binary perfect after recompilation, and if youre modder you can add brand new script to the game.
+
+Example mod files for no debt included in this repo if you want it.
 
 All the source code was written in `python3` and tested in a `Manjaro 20.2` machine with a `python3.9` interpreter.
 
@@ -22,7 +24,7 @@ All the source code was written in `python3` and tested in a `Manjaro 20.2` mach
 
 ##   Usage
 
-Symlink to main script can be found in `bin/dso4spaz`.
+Symlink to main script can be found in `bin/dso4spaz`. But of course you can use dso2cs.py directly.
 
 
 ```
