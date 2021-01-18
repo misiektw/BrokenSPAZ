@@ -2,7 +2,7 @@ This is No Respec Cost mod for SPAZ. Working with v.1.605 Linux version from Hum
 
 Installation:
 
-1. Decompile exec.cs.dso (I dont want to include file here, because possible copyright issues).
+1. Decompile exec.cs.dso using BrokenSPAZ decompiler. (I dont want to include file here, because possible copyright issues).
 
 python dso2cs.py exec.cs.dso
 
