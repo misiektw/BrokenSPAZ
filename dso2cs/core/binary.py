@@ -21,7 +21,7 @@ class Reading():
     '''
     def read(self, n):
         rd = self.byteStream[self.pointer:self.pointer+n]
-
+        #print(self.pointer, rd, n)
         if len(rd) != n:
             raise IndexError("Index out of range")
 
@@ -115,6 +115,13 @@ class Reading():
         else:
             return unpack(self.structEndian[endian] + "f", self.read32())[0]
 
+    def unpackFloat64(self, endian=None):
+        if endian is None:
+            return unpack(self.structEndian[self.endian] + "d", self.read64())[0]
+        else:
+            return unpack(self.structEndian[endian] + "d", self.read32())[0]
+
+
     '''
     The same as read, but without moving the reading pointer
     @param  n       Number of bytes to be looked up
@@ -176,3 +183,12 @@ class Reading():
     '''
     def replace(self, idx, data):
         self.byteStream = self.byteStream[:idx] + data + self.byteStream[idx+len(data):]
+
+    '''
+    Insert data in the stream. Replace bytes if discard value given
+    @param  idx     Index of the stream to be replace data
+    @param  data    Binary data to be placed
+    @param  discard Amount of bytes to be discarded
+    '''
+    def insert(self, idx, data, discard=0):
+        self.byteStream = self.byteStream[:idx] + data + self.byteStream[idx+discard:]

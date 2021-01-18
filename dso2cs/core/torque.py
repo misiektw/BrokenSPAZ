@@ -17,7 +17,12 @@ class Operation:
     '''
     def __init__(self, operands):
         self.operands = operands
-
+        
+        try:
+            if isinstance(operands[0], StringEqual):
+                self.isString = operands[0].isString
+        except:
+            pass
     '''
     Equal operator override
     @params obj     Object to compare this instance with
@@ -39,6 +44,15 @@ class Add(Operation):
     def __str__(self):
         return " + ".join(str(op) for op in self.operands)
 
+class AddPP(Operation):
+    isArithmetic = True
+
+    '''
+    String representation override
+    '''
+    def __str__(self):
+        return str(self.operands[0]) + "++"
+
 
 '''
 TorqueScript Subtraction operation
@@ -46,12 +60,18 @@ TorqueScript Subtraction operation
 class Sub(Operation):
     isArithmetic = True
 
+
+    def __str__(self):
+        return " - ".join(str(op) for op in self.operands)
+
+class SubPP(Operation):
+    isArithmetic = True
+
     '''
     String representation override
     '''
     def __str__(self):
-        return " - ".join(str(op) for op in self.operands)
-
+        return str(self.operands[0]) + "--"
 
 '''
 TorqueScript Multiply operation
@@ -59,11 +79,15 @@ TorqueScript Multiply operation
 class Mul(Operation):
     isArithmetic = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
-        return " * ".join(str(op) for op in self.operands)
+        br = []
+        for op in self.operands:
+            if isinstance(op, Add) or isinstance(op, Sub):
+                br.append('('+ str(op) +')')
+            else:
+                br.append(str(op))
+        return " * ".join(br)
 
 
 '''
@@ -72,11 +96,15 @@ TorqueScript Division operation
 class Div(Operation):
     isArithmetic = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
-        return " / ".join(str(op) for op in self.operands)
+        br = []
+        for op in self.operands:
+            if isinstance(op, Add) or isinstance(op, Sub):
+                br.append('('+ str(op) +')')
+            else:
+                br.append(str(op))
+        return " / ".join(br)
 
 
 '''
@@ -85,9 +113,7 @@ TorqueScript Modulo operation
 class Mod(Operation):
     isArithmetic = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " % ".join(str(op) for op in self.operands)
 
@@ -98,14 +124,20 @@ TorqueScript Modulo operation
 class Neg(Operation):
     isArithmetic = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
-        if isinstance(self.operands[0], float):
-            return "-" + str(self.operands[0])
-        else:
-            return "-1.0 * " + str(self.operands[0])
+        #if isinstance(self.operands[0], float):
+        ##    return "-" + str(self.operands[0])
+        #elif
+        #else:
+        try:
+            number = eval("-1.0 * " + str(self.operands[0]))
+            return str(number)
+        except:
+            if True in [ self.operands[0][0] == v for v in ['$','%','('] ]:
+                return "-" + str(self.operands[0])
+            else:
+                return "-1.0 * " + str(self.operands[0])
 
 
 '''
@@ -114,14 +146,15 @@ TorqueScript Negation operation
 class Not(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         # If negates a boolean equal operation:
         if isinstance(self.operands[0], StringEqual):
             operands = self.operands[0].operands
-            operation = NotEqual(operands)
+            if self.isString:
+                operation = StringNotEqual(operands)
+            else:
+                operation = NotEqual(operands)
             return str(operation)
         # If negates a boolean not equal operation:
         elif isinstance(self.operands[0], StringNotEqual):
@@ -168,9 +201,7 @@ TorqueScript Equal operation
 class Equal(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " == ".join(str(op) for op in self.operands)
 
@@ -180,10 +211,8 @@ TorqueScript Not Equal operation
 '''
 class NotEqual(Operation):
     isBoolean = True
+    
 
-    '''
-    String representation override
-    '''
     def __str__(self):
         return " != ".join(str(op) for op in self.operands)
 
@@ -194,9 +223,7 @@ TorqueScript Less Than operation
 class Less(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " < ".join(str(op) for op in self.operands)
 
@@ -207,9 +234,7 @@ TorqueScript Less Than Or Equal To operation
 class LessOrEqual(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " <= ".join(str(op) for op in self.operands)
 
@@ -220,9 +245,7 @@ TorqueScript Greater Than operation
 class Greater(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " > ".join(str(op) for op in self.operands)
 
@@ -233,9 +256,7 @@ TorqueScript Greater Than Or Equal To operation
 class GreaterOrEqual(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " >= ".join(str(op) for op in self.operands)
 
@@ -246,9 +267,7 @@ TorqueScript And operation
 class And(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " && ".join(str(op) for op in self.operands)
 
@@ -259,9 +278,7 @@ TorqueScript Or operation
 class Or(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " || ".join(str(op) for op in self.operands)
 
@@ -272,9 +289,7 @@ TorqueScript One's Complement operation
 class Complement(Operation):
     isBoolean = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " ~ ".join(str(op) for op in self.operands)
 
@@ -285,9 +300,7 @@ TorqueScript Bitwise And operation
 class BitAnd(Operation):
     isBitwise = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " & ".join(str(op) for op in self.operands)
 
@@ -298,9 +311,7 @@ TorqueScript Bitwise Or operation
 class BitOr(Operation):
     isBitwise = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " | ".join(str(op) for op in self.operands)
 
@@ -311,9 +322,7 @@ TorqueScript Bitwise Xor operation
 class Xor(Operation):
     isBitwise = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " ^ ".join(str(op) for op in self.operands)
 
@@ -324,9 +333,7 @@ TorqueScript Shift Left operation
 class ShiftLeft(Operation):
     isBitwise = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " << ".join(str(op) for op in self.operands)
 
@@ -337,9 +344,7 @@ TorqueScript Shift Right operation
 class ShiftRight(Operation):
     isBitwise = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " >> ".join(str(op) for op in self.operands)
 
@@ -350,9 +355,7 @@ TorqueScript String Equal operation
 class StringEqual(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " $= ".join(str(op) for op in self.operands)
 
@@ -363,9 +366,7 @@ TorqueScript String Not Equal operation
 class StringNotEqual(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " !$= ".join(str(op) for op in self.operands)
 
@@ -376,9 +377,7 @@ TorqueScript String Concatenation operation
 class Concat(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " @ ".join(str(op) for op in self.operands)
 
@@ -389,9 +388,7 @@ TorqueScript String Newline Concatenation operation
 class ConcatNl(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " NL ".join(str(op) for op in self.operands)
 
@@ -402,9 +399,7 @@ TorqueScript String Tab Concatenation operation
 class ConcatTab(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " TAB ".join(str(op) for op in self.operands)
 
@@ -415,9 +410,7 @@ TorqueScript String Space Concatenation operation
 class ConcatSpc(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return " SPC ".join(str(op) for op in self.operands)
 
@@ -428,9 +421,7 @@ TorqueScript String Comma Concatenation operation (for array access)
 class ConcatComma(Operation):
     isString = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return ", ".join(str(op) for op in self.operands)
 
@@ -441,12 +432,12 @@ TorqueScript Array Access operation
 class ArrayAccess(Operation):
     isAccess = True
 
-    '''
-    String representation override
-    '''
-    def __str__(self):
-        return str(self.operands[0]) + "[" + str(self.operands[1]) + "]"
 
+    def __str__(self):
+        try:
+            return str(self.operands[0]) + "[" + str(int(eval(self.operands[1]))) + "]"
+        except:
+            return str(self.operands[0]) + "[" + str(self.operands[1]) + "]"
 
 '''
 TorqueScript Field Access operation
@@ -454,9 +445,7 @@ TorqueScript Field Access operation
 class FieldAccess(Operation):
     isAccess = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return ".".join(str(op) for op in self.operands)
 
@@ -471,7 +460,8 @@ class Node:
     def __init__(self):
         self.parent = None
         self.children = []
-        self.block = 0
+        self.block = False
+        self.is_object = False
 
     '''
     Equal operator override
@@ -511,15 +501,18 @@ class Assignment(Node):
             self.children = self.right.children
             # Indicate if there is a block of code (children):
             self.block = self.right.block
+            self.is_object = self.right.is_object
         else:
             # No block otherwise:
             self.block = False
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
-        return str(self.left) + " = " + str(self.right)
+        if isinstance(self.right, AddPP) or isinstance(self.right, SubPP):
+            if self.left == self.right.operands[0]:
+                return str(self.right).replace('\n', '\\n') # put only var++/var-- not var=var++
+        else:
+            return str(self.left) + " = " + str(self.right).replace('\n', '\\n')
 
 
 '''
@@ -536,9 +529,7 @@ class Break(Node):
         # No block declaration:
         self.block = False
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return "break"
 
@@ -557,9 +548,7 @@ class Else(Node):
         # Block declaration:
         self.block = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return "else"
 
@@ -578,12 +567,6 @@ class File(Node):
 
         self.name = name
 
-        # No block declaration:
-        self.block = False
-
-    '''
-    String representation override
-    '''
     def __str__(self):
         return "// Decompiled file: " + self.name
 
@@ -623,9 +606,7 @@ class FuncCall(Node):
         # No block declaration:
         self.block = False
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         if self.namespace == "":
             if self.callTypes[self.callType] == "Parent":
@@ -670,9 +651,7 @@ class FuncDecl(Node):
         # Block declaration:
         self.block = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         if self.namespace == "":
             return "function " + self.name + "(" + str(ConcatComma(self.argv)) + ")"
@@ -698,11 +677,9 @@ class If(Node):
         self.elseHandle = None
 
         # Block declaration:
-        self.block = 1
+        self.block = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return "if (" + str(self.condition) + ")"
     
@@ -717,29 +694,33 @@ class ObjCreation(Node):
     @param  mistery     Some value I do not know what is about
     @param  argv        List of arguments passed to object
     '''
-    def __init__(self, parentName, mistery, argv):
+    def __init__(self, parentName, is_dblock, is_internal, is_message, argv):
         # Inherit characteristics from Node:
         super().__init__()
 
         self.parentName = parentName
-        self.mistery = mistery # TODO: Find ou what this is about
+        self.is_dblock = is_dblock
 
         # First argument is object type:
         self.objType = argv[0]
         self.argv = argv[1:]
 
-        if self.argv:
+        if self.argv and self.parentName:
             # Second argument is object name:
-            self.argv[0] = "Name : " + str(self.argv[0])
+            self.argv[0] = str(self.argv[0]) + " : " + self.parentName
+        else:
+            self.argv[0] = str(self.argv[0])
 
         # Block declaration:
         self.block = True
+        self.is_object = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
-        return "new " + self.objType + "(" + str(ConcatComma(self.argv)) + ")"
+        if self.is_dblock:
+            return "datablock " + self.objType + "( " + str(ConcatComma(self.argv)) + " )"
+        else:
+            return "new " + self.objType + "( " + str(ConcatComma(self.argv)) + " )"
 
 
 '''
@@ -756,17 +737,11 @@ class Return(Node):
 
         self.value = value
 
-        # No block declaration:
-        self.block = False
-
-    '''
-    String representation override
-    '''
     def __str__(self):
-        if self.value == None:
-            return "return"
-        else:
+        if self.value:
             return "return " + str(self.value)
+        else:
+            return "return"
 
 
 '''
@@ -786,9 +761,7 @@ class While(Node):
         # Block declaration:
         self.block = True
 
-    '''
-    String representation override
-    '''
+
     def __str__(self):
         return "while (" + str(self.condition) + ")"
 
@@ -895,8 +868,11 @@ class Tree:
         if thisNode.block:
             # Unindent:
             self.indent = self.indent[:-thisNode.block]
-            # Close brackets:
-            print(self.indent + "}", file=sink)
+            # Close brackets (objects need "};" ) :
+            if thisNode.is_object:
+                print(self.indent + "};", file=sink)
+            else:
+                print(self.indent + "}", file=sink)
 
         # Restore current node:
         self.curNode = thisNode

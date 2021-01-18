@@ -9,6 +9,12 @@ from sys import stdout, stderr
 
 from core import dso, codec
 
+def compare_dso(file1, file2):
+    files = {file1:[], file2:[]}
+    for file in files:
+        file.append()
+
+
 def getArgs():
     parser = argparse.ArgumentParser()
 
@@ -21,15 +27,6 @@ def getArgs():
     )
 
     parser.add_argument(
-        "--parse-only",
-        dest="parseOnly",
-        action="store_const",
-        const="parseOnly",
-        default=False,
-        help="only parse the file and dump the structures"
-    )
-
-    parser.add_argument(
         "--debug",
         dest="debug",
         action="store_const",
@@ -37,12 +34,26 @@ def getArgs():
         default=False,
         help="set logging level to DEBUG"
     )
+    parser.add_argument(
+        "--compare",
+        dest="compare",
+        action="store_const",
+        const="compare",
+        default=False,
+        help="compare two DSO files"
+    )
+
 
     opt = parser.parse_args()
 
-    return opt.fnames, opt.parseOnly, opt.debug
+    return opt.fnames, opt.debug, opt.compare
 
-fnames, parseOnly, debug = getArgs()
+
+fnames, debug, compare = getArgs()
+#fnames, debug, compare = ["setup.cs.dso"], True, False
+#fnames, debug, compare = ["datablocks.cs.dso"], True, False
+#fnames, debug, compare = ["globalTuning.cs.dso"], True
+#fnames, debug, compare = ["researchScreen.cs.dso"], True
 
 if debug:
     logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s]: %(filename)s: %(lineno)d: %(message)s", stream=stdout)
@@ -52,67 +63,76 @@ else:
 success = []
 failed = []
 
-for path in [Path(f) for f in fnames]:
-    logging.info("Decompiling file: {}".format(path.name))
+if compare:
+    try:
+        f1, f2 = [ Path(f) for f in fnames ]
+    except:
+        logging.error('Need two DSO files for compare.'); exit(-1)
+    else:
+        dso.File(f1).compare(dso.File(f2))
+        logging.info(f'Finished comparing {f1} and {f2}')
+        exit(0)
 
+for path in [Path(f) for f in fnames]:
     logging.info("Parsing file: {}".format(path.name))
     try:
         myFile = dso.File(path)
         myFile.parse()
     except Exception as e:
-        logging.error("Failed to parse file: {}: Got exception: {}".format(path.name, repr(e)))
+        if debug: logging.exception("Failed to parse file: {}: Got exception: {}".format(path.name, repr(e)))
+        else: logging.error("Failed to parse file: {}: Got exception: {}".format(path.name, repr(e)))
         failed.append(path)
         continue
 
     logging.info("Successfully parsed file: {}".format(path.name))
 
-    if parseOnly:
+    if debug:
         outPath = path.with_suffix(path.suffix + ".txt")
         with open(outPath, "w") as fd:
             myFile.dump(sink=fd)
 
-        logging.info("Parse only option is enabled: Output stored in: {}".format(outPath))
-        success.append(path)
-    else:
-        logging.info("Decoding file: {}".format(path.name))
-        try:
-            decoder = codec.Decoding(myFile)
-            decoder.decode()
-        except Exception as e:
+        logging.debug("Debug enabled. Additional output stored in: {}".format(outPath))
+   
+    logging.info("Decoding file: {}".format(path.name))
+    try:
+        decoder = codec.Decoding(myFile)
+        decoder.decode()
+    except Exception as e:
+        if debug: 
+            logging.exception("Failed to decode file: {}: Got exception: {}".format(path.name, repr(e)))
+            logging.warning('Writing partial decode to file')
+        else: 
             logging.error("Failed to decode file: {}: Got exception: {}".format(path.name, repr(e)))
-            failed.append(path)
-            continue
-
+        failed.append(path)
+    else:
         logging.info("Successfully decoded file: {}".format(path.name))
 
-        decoder.tree.rewind()
+    decoder.tree.rewind()
+    outPath = path.with_suffix(path.suffix + ".cs")
 
-        outPath = path.with_suffix(path.suffix + ".cs")
-
-        logging.info("Formatting file: {}".format(path.name))
-        try:
+    try:
+        if not outPath in failed or debug:
+            logging.info("Formatting file: {}".format(path.name))
             with open(outPath, "w") as fd:
                 decoder.tree.format(sink=fd)
-        except Exception as e:
-            logging.error("Failed to format file: {}: Got exception: {}".format(path.name, repr(e)))
-            failed.append(path)
+    except Exception as e:
+        logging.error("Failed to format file: {}: Got exception: {}".format(path.name, repr(e)))
+        failed.append(path)
+        if outPath.is_file() and not debug:
+            remove(outPath)
+        continue
 
-            if outPath.is_file():
-                remove(outPath)
-
-            continue
-
-        logging.info("Successfully formatted file: {}".format(path.name))
-
-        logging.info("Successfully decompiled file: {}".format(path.name))
-        logging.info("Output stored in: {}".format(outPath))
-
-        success.append(path)
+    if path in failed and debug:
+        logging.info("Partially formatted file: {}. Output stored in: {}".format(path.name, outPath))
+    elif path in failed:
+        logging.info("Failed to format file: {}.".format(path.name))
+    
+    success.append(path)
 
 if failed:
-    logging.info("The following files failed to be decompiled:")
+    logging.info("The following failed to be decompiled fully:")
 
     for path in failed:
         logging.info(str(path))
 
-logging.info("Successfully decompiled {} out of {} input files".format(len(success), len(fnames)))
+logging.info("Fully decompiled {} out of {} input files".format(len(success), len(fnames)))

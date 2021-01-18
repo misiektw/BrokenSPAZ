@@ -2,6 +2,7 @@ from sys import stdout
 import logging
 
 from core import dso, torque
+from core.opcodes import OPCODES, opByName
 
 '''
 Class for simulating the data structure used by Torque VM
@@ -102,6 +103,7 @@ class Decoding:
     def __init__(self, dsoFile, inFunction=0, offset=0):
         self.file = dsoFile
         self.inFunction = inFunction
+        self.in_object = 0 # if inside object, with nesting ++
         self.offset = offset
 
         # For storing current variable, object and field:
@@ -123,7 +125,7 @@ class Decoding:
 
         # Main tree of file:
         self.tree = torque.Tree(torque.File(self.file.name))
-
+        
         # Stack of opcode calls performed:
         self.callStack = []
 
@@ -140,6 +142,12 @@ class Decoding:
         return self.file.byteCode.getCode()
 
     '''
+    Check next code of bytecode without advancing IP
+    '''
+    def chkNextCode(self):
+        return self.file.byteCode.lookupUnpackUint8()
+
+    '''
     Retrieves next data of bytecode as uint
     '''
     def getUint(self):
@@ -150,6 +158,15 @@ class Decoding:
     '''
     def getStringOffset(self):
         return self.file.byteCode.getStringOffset()
+
+    '''
+    Retrieves string value at top of stack. (For compat with compileEval.cc)
+    '''
+    def getStringValue(self):
+        if self.strStack:
+            return self.strStack[-1]
+        else:
+            return None
 
     '''
     Retrieves string of Global String Table
@@ -187,8 +204,15 @@ class Decoding:
     @param  encoding    Encoding of the string
     '''
     def getStringByOffset(self, offset, encoding="utf-8"):
+        if self.file.byteCode.in_patchlocks:
+            return self.getGlobalStringByOffset(offset, encoding)
         if self.inFunction and self.file.functionStringTable:
-            return self.getFunctionStringByOffset(offset, encoding)
+            try:
+                return self.getFunctionStringByOffset(offset, encoding)
+            except KeyError:
+                logging.warning(f'String of offset {offset} was not in FunctionTable, trying global.')
+                # some variables in function are stored in global table
+                return self.getGlobalStringByOffset(offset, encoding)
         else:
             return self.getGlobalStringByOffset(offset, encoding)
 
@@ -318,6 +342,7 @@ class Decoding:
 
         # Get function namespace:
         offset = self.getStringOffset()
+
         namespace = self.getGlobalStringByOffset(offset) if offset else ""
 
         # Get function package:
@@ -334,16 +359,15 @@ class Decoding:
         # Get argc of function (number of arguments):
         argc = self.getCode()
 
+        
         # Get argv of function (list of arguments):
         argv = []
-        for _ in range(0, argc):
+        for _ in range(0, argc): 
             offset = self.getStringOffset()
             string = self.getGlobalStringByOffset(offset)
-
             # Mark parameter as local variable if not already done:
             if string[0] != "%":
                 self.setGlobalString(offset, "%" + string)
-
             argv.append(string)
 
         # Instantiate object:
@@ -361,7 +385,8 @@ class Decoding:
         # Indicate flow has entered another function:
         self.inFunction += 1
 
-        logging.debug("IP: {}: {}: Declare function: {}, {}, {}, {}, {}, {}".format(self.ip, self.dumpInstruction(), funcName, namespace, package, hasBody, end, argc))
+        logging.debug("IP: {}: {}: Declare function: {}, {}, {}, {}, {}, {}".format(
+            self.ip, self.dumpInstruction(), funcName, namespace, package, hasBody, end, argc))
 
     '''
     Routine called for OP_CREATE_OBJECT (create an an object)
@@ -372,27 +397,32 @@ class Decoding:
         # Get parent object:
         parent = self.getString()
 
-        # TODO: This is a mistery because I actually do not know what it is
-        mistery = self.getCode()
-
+        #Mistery codes demistified
+        # "datablock" instead of "new"
+        is_dblock   = self.getUint()
+        is_internal = self.getCode() # not used
+        is_message  = self.getCode() # not used
+        
         # Get end of object creation (first instruction after its end):
         end = self.getByteIndex(self.getCode())
 
         # Get argv of object (list of arguments):
         argv = self.argFrame.pop()
 
-        for string in argv[1:]:
-            # Mark parameter as local variable if not already done:
-            if isinstance(string, str) and string[0] != "%":
-                string = "%" + string
+        # Concated variables/strings are passed as lists, because OP_ADVANCE_STR is called earlier.
+        for i, arg in enumerate(argv):
+            if i>0 and isinstance(arg, list):
+                argv[i] = torque.Concat(arg)
 
         # Store current tree on stack:
         self.treeStack.append(self.tree)
 
         # Instantiate object and add it to the root of a new tree:
-        self.tree = torque.Tree(torque.ObjCreation(parent, mistery, argv))
-
-        logging.debug("IP: {}: {}: Create object: {}, {}, {}".format(self.ip, self.dumpInstruction(), parent, mistery, end))
+        self.tree = torque.Tree(torque.ObjCreation(parent, is_dblock, is_internal, is_message, argv))
+        self.in_object += 1
+        
+        logging.debug("IP: {}: {}: Create object {}: parent {}, {}, end {}".format(
+            self.ip, self.dumpInstruction(), self.in_object, parent, (is_dblock, is_internal, is_message), end))
 
     '''
     Routine called for OP_ADD_OBJECT (add object to stack)
@@ -433,7 +463,9 @@ class Decoding:
             # Append the object to the tree already since it will not be assigned to anything:
             self.tree.append(self.intStack.pop())
 
-        logging.debug("IP: {}: {}: End object".format(self.ip, self.dumpInstruction()))
+        self.in_object -= 1
+        logging.debug("IP: {}: {}: End object {}".format(self.ip, self.dumpInstruction(), self.in_object))
+
 
     '''
     Routine called for OP_JMPIFFNOT (jump if condition retrieved from float stack not met)
@@ -686,13 +718,38 @@ class Decoding:
     Appends a torque.Return object to the tree
     '''
     def opReturn(self):
-        # If a return value was loaded:
-        if self.strStack:
-            ret = self.strStack[-1]
-        else:
-            ret = None
+        # Omit last byte. In v.41 its always return.
+        if self.ip < self.file.byteCode.binLen-1:
+            # If a return value was loaded:
+            ret = self.getStringValue()
+            
+            #String concat (@) doesnt have OP before return. So lets do it here?
+            if isinstance(ret, list):
+                while (len(ret)>1):
+                    if isinstance(ret[1], str):
+                        ret[1]=torque.Concat(ret[:2])
+                        ret = ret[1:]
+                ret=ret[0]
+            
+            if len(self.strStack)==0  \
+                and isinstance(self.tree.curNode, torque.FuncDecl) \
+                and self.tree.curNode.end == self.ip+1:
+                    pass    #skip return if empty and function ends on next ip
+            else:
+                self.tree.append(torque.Return(ret))
+        
+            # Torque 1.7.5 (dso v41) seems to always puts 2 return codes even if its not needed.
+            # Try to discard second OP_RETURN when its not needed.
+            
+            if self.chkNextCode() == opByName['OP_RETURN']: 
+                if not isinstance(self.tree.curNode , torque.If):
+                    if not isinstance(self.tree.curNode, torque.Else):
+                        self.getCode() # just skip code
+                    else:
+                        #Fine, but dont repeat last stack value
+                        self.strStack.pop()
 
-        self.tree.append(torque.Return(ret))
+       
 
         logging.debug("IP: {}: {}: Return".format(self.ip, self.dumpInstruction()))
 
@@ -872,7 +929,12 @@ class Decoding:
     Appends a torque.Add operation to the float stack
     '''
     def opAdd(self):
-        self.fltStack.append(torque.Add([self.fltStack.pop(), self.fltStack.pop()]))
+        #Deal with ++ first
+        if self.op_setcurvar_create and self.fltStack[-2] == 1:
+            self.op_setcurvar_create = False
+            self.fltStack.append(torque.AddPP([self.fltStack.pop(),self.fltStack.pop()]))
+        else:
+            self.fltStack.append(torque.Add([self.fltStack.pop(), self.fltStack.pop()]))
 
         logging.debug("IP: {}: {}: Sum floats".format(self.ip, self.dumpInstruction()))
 
@@ -882,7 +944,11 @@ class Decoding:
     Appends a torque.Sub operation to the float stack
     '''
     def opSub(self):
-        self.fltStack.append(torque.Sub([self.fltStack.pop(), self.fltStack.pop()]))
+        if self.op_setcurvar_create and self.fltStack[-2] == 1:
+            self.op_setcurvar_create = False
+            self.fltStack.append(torque.SubPP([self.fltStack.pop(),self.fltStack.pop()]))
+        else:
+            self.fltStack.append(torque.Sub([self.fltStack.pop(), self.fltStack.pop()]))
 
         logging.debug("IP: {}: {}: Subtract floats".format(self.ip, self.dumpInstruction()))
 
@@ -917,14 +983,16 @@ class Decoding:
         logging.debug("IP: {}: {}: Invert sign of float".format(self.ip, self.dumpInstruction()))
 
     '''
-    Routine called for OP_SETCURVAR and OP_SETCURVAR_CREATE (set name/symbol of current variable)
+    Routine called for OP_SETCURVAR (set name/symbol of current variable)
 
     Retrieves the symbol from the Global String Table and sets current variable to it
     '''
     def opSetcurvar(self):
         offset = self.getStringOffset()
         string = self.getGlobalStringByOffset(offset)
+        self.op_setcurvar_create = False
 
+        # This shouldnt be necessary? Variables are stored with $/% and may interfere with fields?
         if string[0] != "$" and string[0] != "%":
             if self.inFunction:
                 # Append local variable prefix:
@@ -937,8 +1005,26 @@ class Decoding:
             self.setGlobalString(offset, string)
 
         self.curvar = string
+        self.curobj = None      # According to T2D compileEval.cc this is a must
 
         logging.debug("IP: {}: {}: Set current variable: {}".format(self.ip, self.dumpInstruction(), self.curvar))
+
+    '''
+    Routine called for OP_SETCURVAR_CREATE (set name/symbol of current variable)
+    Retrieves the symbol from the Global String Table and sets current variable to it
+    Edge cases: ++ operator generates this before opAdd
+
+    '''
+
+    def opSetcurvarCreate(self):
+        offset = self.getStringOffset()
+        string = self.getGlobalStringByOffset(offset)
+        self.op_setcurvar_create = True
+
+        self.curvar = string
+        self.curobj = None      # According to T2D compileEval.cc this is a must
+
+        logging.debug("IP: {}: {}: Set current variable (create): {}".format(self.ip, self.dumpInstruction(), self.curvar))
 
     '''
     Routine called for OP_SETCURVAR_ARRAY and OP_SETCURVAR_ARRAY_CREATE (set name/symbol and index of current array variable)
@@ -946,9 +1032,29 @@ class Decoding:
     Retrieves the symbol and index from string stack and append them to tree as torque.ArrayAccess
     '''
     def opSetcurvarArray(self):
-        self.curvar = torque.ArrayAccess(self.strStack[-1])
+        self.curvar = torque.ArrayAccess(self.strStack[-1])     # StringTable->insert(mBuffer + mStart);
+        self.curobj = None      # According to T2D compileEval.cc this is a must
 
         logging.debug("IP: {}: {}: Set current array variable".format(self.ip, self.dumpInstruction()))
+
+    '''
+    Routine called for OP_SETCURVAR_ARRAY_CREATE (set name/symbol and index of current array variable)
+
+    Retrieves the symbol and index from string stack and append them to tree as torque.ArrayAccess
+    '''
+    def opSetcurvarArrayCreate(self):
+        self.curvar = torque.ArrayAccess(self.strStack[-1])     # StringTable->insert(mBuffer + mStart);
+        # If it is ++ operator then remove it from tree, because previous assignment put it there
+        # it happens in case of $Array[var++]/$Array[var--]
+        arr_ind = self.curvar.operands[1]
+        if isinstance(arr_ind, torque.AddPP) or isinstance(arr_ind, torque.AddPP):
+            if arr_ind == self.tree.curNode.children[-1]:
+                self.tree.curNode.children.pop()
+
+        self.curobj = None      # According to T2D compileEval.cc this is a must
+
+        logging.debug("IP: {}: {}: Set current array variable".format(self.ip, self.dumpInstruction()))
+
 
     '''
     Routine called for OP_LOADVAR_UINT (load current variable value to int stack)
@@ -1006,7 +1112,11 @@ class Decoding:
 
         self.curvar = (name, value)
 
-        self.tree.append(torque.Assignment(name, value))
+        if self.op_setcurvar_create and (isinstance(value, torque.AddPP) or isinstance(value, torque.SubPP)):
+            # ++/-- operators are compiled twice
+            pass
+        else:
+            self.tree.append(torque.Assignment(name, value))
 
         logging.debug("IP: {}: {}: Save float value into variable".format(self.ip, self.dumpInstruction()))
 
@@ -1017,7 +1127,8 @@ class Decoding:
     '''
     def opSavevarStr(self):
         name = self.curvar
-        value = self.strStack[-1]
+        
+        value = self.getStringValue()
 
         if isinstance(value, list):
             value = torque.Concat(value)
@@ -1034,9 +1145,9 @@ class Decoding:
     Retrieves the symbol from the string stack and sets current object to it
     '''
     def opSetcurobject(self):
-        self.curobj = self.strStack[-1]
+        self.curobj = self.getStringValue()
 
-        logging.debug("IP: {}: {}: Set current object".format(self.ip, self.dumpInstruction()))
+        logging.debug("IP: {}: {}: {}: Set current object to ".format(self.ip, self.dumpInstruction(), self.curobj))
 
     '''
     Routine called for OP_SETCUROBJECT_NEW (unset name/symbol of current object)
@@ -1044,6 +1155,11 @@ class Decoding:
     Sets current object to None
     '''
     def opSetcurobjectNew(self):
+        self.curobj = None
+
+        logging.debug("IP: {}: {}: Set new current object".format(self.ip, self.dumpInstruction()))
+
+    def opSetcurobjectNewInt(self):
         self.curobj = None
 
         logging.debug("IP: {}: {}: Set new current object".format(self.ip, self.dumpInstruction()))
@@ -1064,7 +1180,7 @@ class Decoding:
     Retrieves the symbol and index from string stack and append them to tree as torque.ArrayAccess
     '''
     def opSetcurfieldArray(self):
-        self.curfield = torque.ArrayAccess([self.curfield, self.strStack[-1]])
+        self.curfield = torque.ArrayAccess([self.curfield, self.getStringValue()])
 
         logging.debug("IP: {}: {}: Set current array field".format(self.ip, self.dumpInstruction()))
 
@@ -1074,9 +1190,15 @@ class Decoding:
     Appends current field symbol to the int stack
     '''
     def opLoadfieldUint(self):
-        self.intStack.append(self.curfield)
+        if self.curobj:
+            field = torque.FieldAccess([self.curobj, self.curfield])
+            ##field = str(self.curobj) + '.' + str(self.curfield)
+        else:
+            field = self.curfield
 
-        logging.debug("IP: {}: {}: Load field of type string: {}".format(self.ip, self.dumpInstruction(), self.curfield))
+        self.intStack.append(field)
+
+        logging.debug("IP: {}: {}: Load field of type string: {}".format(self.ip, self.dumpInstruction(), field))
 
     '''
     Routine called for OP_LOADFIELD_FLT (load current field value to float stack)
@@ -1084,9 +1206,14 @@ class Decoding:
     Appends current field symbol to the float stack
     '''
     def opLoadfieldFlt(self):
-        self.fltStack.append(self.curfield)
+        if self.curobj:
+            field = torque.FieldAccess([self.curobj, self.curfield])
+            #field = str(self.curobj) + '.' + str(self.curfield)
+        else:
+            field = self.curfield
+        self.fltStack.append(field)
 
-        logging.debug("IP: {}: {}: Load field of type string: {}".format(self.ip, self.dumpInstruction(), self.curfield))
+        logging.debug("IP: {}: {}: Load field of type string: {}".format(self.ip, self.dumpInstruction(), field))
 
     '''
     Routine called for OP_LOADFIELD_STR (load current field value to string stack)
@@ -1094,9 +1221,24 @@ class Decoding:
     Appends current field symbol to the string stack
     '''
     def opLoadfieldStr(self):
-        self.strStack.load(self.curfield)
+        if self.curobj:
+            self.strStack.load(torque.FieldAccess([self.curobj, self.curfield]))
+            #self.strStack.load(str(self.curobj) + '.' + str(self.curfield))
+        else:
+            self.strStack.load(self.curfield)
 
-        logging.debug("IP: {}: {}: Load field of type string: {}".format(self.ip, self.dumpInstruction(), self.curfield))
+        logging.debug("IP: {}: {}: Load field (string): {} from object{}".format(self.ip, self.dumpInstruction(), self.curfield, self.curobj))
+        '''
+        case OP_LOADFIELD_STR:
+            if(curObject) {
+               val = curObject->getDataField(curField, curFieldArray);
+               STR.setStringValue( val );  }
+            else {
+               // The field is not being retrieved from an object. Maybe it's
+               // a special accessor?
+               getFieldComponent( prevObject, prevField, prevFieldArray, curField, valBuffer, VAL_BUFFER_SIZE );
+               STR.setStringValue( valBuffer ); }
+        '''
 
     '''
     Routine called for OP_SAVEFIELD_UINT (save uint value into current field)
@@ -1153,7 +1295,7 @@ class Decoding:
             # Assignment to field of current object:
             name = torque.FieldAccess([self.curobj, self.curfield])
 
-        value = self.strStack[-1]
+        value = self.getStringValue()
 
         self.curfield = (name, value)
 
@@ -1167,9 +1309,9 @@ class Decoding:
     Pushes popped value from string stack into int stack
     '''
     def opStrToUint(self):
-        self.intStack.append(self.strStack[-1])
+        self.intStack.append(self.getStringValue())
 
-        logging.debug("IP: {}: {}: Pop string into uint stack".format(self.ip, self.dumpInstruction()))
+        logging.debug("IP: {}: {}: Add top of string into uint stack".format(self.ip, self.dumpInstruction()))
 
     '''
     Routine called for OP_STR_TO_FLT (convert string to float)
@@ -1177,9 +1319,9 @@ class Decoding:
     Pushes popped value from string stack into float stack
     '''
     def opStrToFlt(self):
-        self.fltStack.append(self.strStack[-1])
+        self.fltStack.append(self.getStringValue())
 
-        logging.debug("IP: {}: {}: Pop string into float stack".format(self.ip, self.dumpInstruction()))
+        logging.debug("IP: {}: {}: Add top of string stack into float stack".format(self.ip, self.dumpInstruction()))
 
     '''
     Routine called for OP_STR_TO_NONE (discard string on top of stack)
@@ -1293,16 +1435,36 @@ class Decoding:
     '''
     def opLoadimmedStr(self):
         offset = self.getStringOffset()
+        
+        # Torque 1.7.5 compiler seems to be bugged. 
+        # All numbers in fields and function calls are read with this OP.
+        all_to_num = False
+        fld_to_num = False
 
-        # Escaping might fail on some cases:
         try:
-            string = "\"" + self.getStringByOffset(offset, "unicode_escape") + "\""
-        except UnicodeDecodeError:
-            string = "\"" + self.getStringByOffset(offset) + "\""
+            if (self.in_object and fld_to_num) or all_to_num:
+                # String table may contain numbers... so... untorque them...
+                string = round(eval(self.getStringByOffset(offset)), ndigits=7) 
+                # And since we know now its a number we can do some trimming
+                if string == int(string):
+                        string = int(string)
+            else:
+                raise Exception
+        except:
+            # Escaping might fail on some cases:
+            try:
+                    string = "\"" + self.getStringByOffset(offset, "unicode_escape") + "\""
+            except UnicodeDecodeError:
+                    string = "\"" + self.getStringByOffset(offset) + "\""
 
         self.strStack.load(string)
 
-        logging.debug("IP: {}: {}: Load string: {}".format(self.ip, self.dumpInstruction(), self.strStack[-1]))
+        logging.debug("IP: {}: {}: Load string: {}".format(self.ip, self.dumpInstruction(), self.getStringValue()))
+
+    def opDocBlockStr(self):
+        #TODO
+        logging.warning('OP_DOCBLOCK_STR not implemented!')
+        logging.debug("IP: {}: {}: Load string: {}".format(self.ip, self.dumpInstruction(), self.getStringValue()))
 
     '''
     Routine called for OP_LOADIMMED_IDENT (load "ident" (string) into stack)
@@ -1311,16 +1473,16 @@ class Decoding:
     '''
     def opLoadimmedIdent(self):
         offset = self.getStringOffset()
-
+        
         # Escaping might fail on some cases:
         try:
-            string = "\"" + self.getStringByOffset(offset, "unicode_escape") + "\""
+            string = self.getStringByOffset(offset, "unicode_escape")
         except UnicodeDecodeError:
-            string = "\"" + self.getStringByOffset(offset) + "\""
+            string = self.getStringByOffset(offset)
 
         self.strStack.load(string)
 
-        logging.debug("IP: {}: {}: Load string (ident): {}".format(self.ip, self.dumpInstruction(), self.strStack[-1]))
+        logging.debug("IP: {}: {}: Load string (ident): {}".format(self.ip, self.dumpInstruction(), self.getStringValue()))
 
     '''
     Routine called for OP_TAG_TO_STR (load "tagged" string into stack)
@@ -1330,7 +1492,7 @@ class Decoding:
     def opTagToStr(self):
         self.strStack.load(self.getGlobalString())
 
-        logging.debug("IP: {}: {}: Load tagged string: {}".format(self.ip, self.dumpInstruction(), self.strStack[-1]))
+        logging.debug("IP: {}: {}: Load tagged string: {}".format(self.ip, self.dumpInstruction(), self.getStringValue()))
 
     '''
     Routine called for OP_CALLFUNC and OP_CALLFUNC_RESOLVE (call function)
@@ -1441,8 +1603,7 @@ class Decoding:
     Appends string from stack to argument frame
     '''
     def opPush(self):
-        self.argFrame[-1].append(self.strStack[-1])
-
+        self.argFrame[-1].append(self.getStringValue())
         logging.debug("IP: {}: {}: Push string to argument frame".format(self.ip, self.dumpInstruction()))
 
     '''
@@ -1459,94 +1620,89 @@ class Decoding:
     Dictionary of calls by opcode
     '''
     callOp = {
-        0:      opFuncDecl,
-        1:      opCreateObject,
-
-
-        4:      opAddObject,
-        5:      opEndObject,
-        6:      opJmpiffnot,
-        7:      opJmpifnot,
-        8:      opJmpiff,
-        9:      opJmpif,
-        10:     opJmpifnotNp,
-        11:     opJmpifNp,
-        12:     opJmp,
-        13:     opReturn,
-        14:     opCmpeq,
-        15:     opCmplt,
-        16:     opCmple,
-        17:     opCmpgr,
-        18:     opCmpge,
-        19:     opCmpne,
-        20:     opXor,
-        21:     opMod,
-        22:     opBitand,
-        23:     opBitor,
-        24:     opNot,
-        25:     opNotf,
-        26:     opOnescomplement,
-        27:     opShr,
-        28:     opShl,
-        29:     opAnd,
-        30:     opOr,
-        31:     opAdd,
-        32:     opSub,
-        33:     opMul,
-        34:     opDiv,
-        35:     opNeg,
-        36:     opSetcurvar,
-        37:     opSetcurvar,
-        38:     opSetcurvar,
-        39:     opSetcurvar,
-        40:     opSetcurvarArray,
-        41:     opSetcurvarArray,
-        42:     opSetcurvarArray,
-        43:     opSetcurvarArray,
-        44:     opLoadvarUint,
-        45:     opLoadvarFlt,
-        46:     opLoadvarStr,
-        47:     opSavevarUint,
-        48:     opSavevarFlt,
-        49:     opSavevarStr,
-        50:     opSetcurobject,
-        51:     opSetcurobjectNew,
-        52:     opSetcurfield,
-        53:     opSetcurfieldArray,
-        54:     opLoadfieldUint,
-        55:     opLoadfieldFlt,
-        56:     opLoadfieldStr,
-        57:     opSavefieldUint,
-        58:     opSavefieldFlt,
-        59:     opSavefieldStr,
-        60:     opStrToUint,
-        61:     opStrToFlt,
-        62:     opStrToNone,
-        63:     opFltToUint,
-        64:     opFltToStr,
-        65:     opFltToNone,
-        66:     opUintToFlt,
-        67:     opUintToStr,
-        68:     opUintToNone,
-        69:     opLoadimmedUint,
-        70:     opLoadimmedFlt,
-        71:     opLoadimmedStr,
-        72:     opLoadimmedIdent,
-        73:     opTagToStr,
-        74:     opCallfunc,
-        75:     opCallfunc,
-
-        77:     opAdvanceStr,
-        78:     opAdvanceStrAppendchar,
-        79:     opAdvanceStrComma,
-        80:     opAdvanceStrNul,
-        81:     opRewindStr,
-        82:     opTerminateRewindStr,
-        83:     opCompareStr,
-        84:     opPush,
-        85:     opPushFrame
+0:opFuncDecl,
+1:opCreateObject,
+2:opAddObject,
+3:opEndObject,
+4:opJmpiffnot,
+5:opJmpifnot,
+6:opJmpiff,
+7:opJmpif,
+8:opJmpifnotNp,
+9:opJmpifNp,
+10:opJmp,
+11:opReturn,
+12:opCmpeq,
+13:opCmpgr,
+14:opCmpge,
+15:opCmplt,
+16:opCmple,
+17:opCmpne,
+18:opXor,
+19:opMod,
+20:opBitand,
+21:opBitor,
+22:opNot,
+23:opNotf,
+24:opOnescomplement,
+25:opShr,
+26:opShl,
+27:opAnd,
+28:opOr,
+29:opAdd,
+30:opSub,
+31:opMul,
+32:opDiv,
+33:opNeg,
+34:opSetcurvar,
+35:opSetcurvarCreate,
+36:opSetcurvarArray,
+37:opSetcurvarArrayCreate,
+38:opLoadvarUint,
+39:opLoadvarFlt,
+40:opLoadvarStr,
+41:opSavevarUint,
+42:opSavevarFlt,
+43:opSavevarStr,
+44:opSetcurobject,
+45:opSetcurobjectNew,
+46:opSetcurobjectNewInt,
+47:opSetcurfield,
+48:opSetcurfieldArray,
+49:opLoadfieldUint,
+50:opLoadfieldFlt,
+51:opLoadfieldStr,
+52:opSavefieldUint,
+53:opSavefieldFlt,
+54:opSavefieldStr,
+55:opStrToUint,
+56:opStrToFlt,
+57:opStrToNone,
+58:opFltToUint,
+59:opFltToStr,
+60:opFltToNone,
+61:opUintToFlt,
+62:opUintToStr,
+63:opUintToNone,
+64:opLoadimmedUint,
+65:opLoadimmedFlt,
+66:opTagToStr,
+67:opLoadimmedStr,
+68:opDocBlockStr,
+69:opLoadimmedIdent,
+70:opCallfunc,
+71:opCallfunc,
+72:opAdvanceStr,
+73:opAdvanceStrAppendchar,
+74:opAdvanceStrComma,
+75:opAdvanceStrNul,
+76:opRewindStr,
+77:opTerminateRewindStr,
+78:opCompareStr,
+79:opPush,
+80:opPushFrame,
     }
-
+    
     '''
     Decodes parsed file
     '''
@@ -1565,16 +1721,28 @@ class Decoding:
                             # Exit function:
                             self.inFunction -= 1
 
+                
                 # Get current opcode:
                 opCode = self.getCode()
-
+                
+                #Dump stacks from previous call
+                logging.debug("\nStacks: SS {} IS {} FS {} BS {}".format(self.strStack, self.intStack, self.fltStack, self.binStack))
+                #Show some info about curent call that about to happen
+                logging.debug('CS:{} IP:{} OP:{} {} af: {} cv:{} cf:{} co:{}'.format(
+                    len(self.callStack), self.ip, opCode, OPCODES[opCode], self.argFrame, self.curvar, self.curfield, self.curobj))
+                logging.debug("Next 10 codes: {}".format(
+                    [ self.file.byteCode.dumpTab[k] for k in self.file.byteCode.dumpTab if self.ip+10 > k >= self.ip ]) )
+                
+                if len(self.callStack) > 167:  
+                    _ = "This is for debugging breakpoint"
+                
                 # Call its respective routine:
                 self.callOp[opCode](self)
 
                 # Record call:
                 self.callStack.append(self.callOp[opCode])
 
-                # Update instruction pointer:
+                # Update instruction pointer and count:
                 self.ip = self.getCurByteIndex()
             except Exception as e:
                 if e.__class__ is KeyError and opCode == self.file.byteCode.endCtrlCode:
